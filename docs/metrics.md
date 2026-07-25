@@ -25,7 +25,8 @@ Every label name and value comes from a fixed allowlist.
 
 Allowed labels are:
 
-- `endpoint`: `chat_completions`, `models`, `health`, or `unmatched`;
+- `endpoint`: `chat_completions`, `models`, `health`, `ready`, `metrics`, or
+  `other`;
 - `method`: `GET`, `POST`, or `OTHER`;
 - `status_class`: `2xx`, `4xx`, `5xx`, or `other`;
 - `mode`: `buffered` or `streaming`;
@@ -33,7 +34,12 @@ Allowed labels are:
 - `error_type`: one upstream value from section 4.
 
 Unsupported HTTP methods map to `OTHER`, unexpected response classes map to
-`other`, and raw paths never become label values.
+`other`, and raw paths never become label values. `/health` and `/health/live`
+normalize to `health`; `/ready` and `/health/ready` normalize to `ready`.
+`/metrics`, `/v1/models`, and `/v1/chat/completions` normalize to `metrics`,
+`models`, and `chat_completions`, respectively. Unmatched paths normalize to
+`other`. The `metrics` endpoint value remains reserved even though scrapes are
+excluded from the HTTP request counter.
 
 Forbidden labels and label values include:
 

@@ -7,6 +7,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
+from llm_platform.main import _normalized_endpoint
 from llm_platform.observability import PrometheusMetrics
 from tests.conftest import Handler, application_client
 from tests.test_chat_completions import UPSTREAM_COMPLETION
@@ -44,6 +45,26 @@ def _stream_response(
         headers={"content-type": "text/event-stream"},
         stream=ChunkedStream(events, terminal_error=terminal_error),
     )
+
+
+@pytest.mark.parametrize(
+    ("route_path", "endpoint"),
+    [
+        ("/health", "health"),
+        ("/health/live", "health"),
+        ("/ready", "ready"),
+        ("/health/ready", "ready"),
+        ("/metrics", "metrics"),
+        ("/v1/models", "models"),
+        ("/v1/chat/completions", "chat_completions"),
+        ("/private/raw-path", "other"),
+    ],
+)
+def test_endpoint_normalization_uses_only_bounded_labels(
+    route_path: str,
+    endpoint: str,
+) -> None:
+    assert _normalized_endpoint(route_path) == endpoint
 
 
 @pytest.mark.asyncio
@@ -294,22 +315,87 @@ async def test_stream_failures_are_bounded_and_balance_gauges(
 
 
 @pytest.mark.asyncio
-async def test_health_and_readiness_are_http_traffic_not_chat_requests(
+@pytest.mark.parametrize(
+    ("path", "endpoint"),
+    [
+        ("/health", "health"),
+        ("/health/live", "health"),
+        ("/ready", "ready"),
+        ("/health/ready", "ready"),
+        ("/v1/models", "models"),
+    ],
+)
+async def test_http_routes_increment_their_normalized_endpoint(
     app_factory: Callable[[Handler], FastAPI],
+    path: str,
+    endpoint: str,
 ) -> None:
     app = app_factory(lambda _request: httpx.Response(200))
 
     async with application_client(app) as client:
-        assert (await client.get("/health")).status_code == 200
-        assert (await client.get("/ready")).status_code == 200
+        assert (await client.get(path)).status_code == 200
 
     metrics = app.state.metrics
     assert (
         _sample(
             metrics,
             "llm_platform_http_requests_total",
-            {"endpoint": "health", "method": "GET", "status_class": "2xx"},
+            {"endpoint": endpoint, "method": "GET", "status_class": "2xx"},
+        )
+        == 1
+    )
+    assert _sample(metrics, "llm_platform_chat_requests_total") == 0
+
+
+@pytest.mark.asyncio
+async def test_unavailable_readiness_is_not_counted_as_a_liveness_failure(
+    app_factory: Callable[[Handler], FastAPI],
+) -> None:
+    app = app_factory(lambda _request: httpx.Response(503))
+
+    async with application_client(app) as client:
+        assert (await client.get("/ready")).status_code == 503
+        assert (await client.get("/health/ready")).status_code == 503
+
+    metrics = app.state.metrics
+    assert (
+        _sample(
+            metrics,
+            "llm_platform_http_requests_total",
+            {"endpoint": "ready", "method": "GET", "status_class": "5xx"},
         )
         == 2
     )
-    assert _sample(metrics, "llm_platform_chat_requests_total") == 0
+    assert (
+        _sample(
+            metrics,
+            "llm_platform_http_requests_total",
+            {"endpoint": "health", "method": "GET", "status_class": "5xx"},
+        )
+        == 0
+    )
+
+
+@pytest.mark.asyncio
+async def test_unknown_paths_use_other_without_raw_path_or_request_id_labels(
+    app_factory: Callable[[Handler], FastAPI],
+) -> None:
+    app = app_factory(lambda _request: httpx.Response(200))
+    raw_path = "/private/tenant-1234"
+    request_id = "42dfc6cc-1350-4dae-ae4a-e06427c18468"
+
+    async with application_client(app) as client:
+        response = await client.get(raw_path, headers={"x-request-id": request_id})
+        exposition = (await client.get("/metrics")).text
+
+    assert response.status_code == 404
+    assert (
+        _sample(
+            app.state.metrics,
+            "llm_platform_http_requests_total",
+            {"endpoint": "other", "method": "GET", "status_class": "4xx"},
+        )
+        == 1
+    )
+    assert raw_path not in exposition
+    assert request_id not in exposition

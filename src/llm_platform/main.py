@@ -118,11 +118,13 @@ def _normalized_endpoint(route_path: str) -> str:
         return "chat_completions"
     if route_path == "/v1/models":
         return "models"
-    if route_path in {"/health", "/health/live", "/ready", "/health/ready"}:
+    if route_path in {"/health", "/health/live"}:
         return "health"
+    if route_path in {"/ready", "/health/ready"}:
+        return "ready"
     if route_path == "/metrics":
         return "metrics"
-    return "unmatched"
+    return "other"
 
 
 def _normalized_method(method: str) -> str:
