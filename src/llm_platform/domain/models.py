@@ -28,5 +28,27 @@ class CompletionResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CompletionChunk:
+    """A validated, backend-neutral streaming completion chunk."""
+
+    payload: dict[str, Any]
+
+    @property
+    def has_content(self) -> bool:
+        """Return whether this chunk contains generated assistant content."""
+
+        choices = self.payload.get("choices")
+        if not isinstance(choices, list):
+            return False
+        return any(
+            isinstance(choice, dict)
+            and isinstance(choice.get("delta"), dict)
+            and isinstance(choice["delta"].get("content"), str)
+            and bool(choice["delta"]["content"])
+            for choice in choices
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ModelInfo:
     id: str

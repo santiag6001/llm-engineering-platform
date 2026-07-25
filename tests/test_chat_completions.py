@@ -61,7 +61,7 @@ async def test_valid_request_is_forwarded(
 
 
 @pytest.mark.asyncio
-async def test_stream_true_is_rejected_without_calling_backend(
+async def test_stream_false_keeps_buffered_behavior(
     app_factory: Callable[[Callable[[httpx.Request], httpx.Response]], FastAPI],
 ) -> None:
     calls = 0
@@ -78,13 +78,14 @@ async def test_stream_true_is_rejected_without_calling_backend(
             json={
                 "model": "test-model",
                 "messages": [{"role": "user", "content": "Hello"}],
-                "stream": True,
+                "stream": False,
             },
         )
 
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "streaming_not_supported"
-    assert calls == 0
+    assert response.status_code == 200
+    assert response.json() == UPSTREAM_COMPLETION
+    assert response.headers["content-type"] == "application/json"
+    assert calls == 1
 
 
 @pytest.mark.asyncio

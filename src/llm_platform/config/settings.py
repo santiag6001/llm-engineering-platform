@@ -14,6 +14,8 @@ class Settings(BaseModel):
 
     llama_server_base_url: HttpUrl = HttpUrl("http://127.0.0.1:8080")
     llama_server_timeout_seconds: float = Field(default=120.0, gt=0)
+    llama_server_stream_idle_timeout_seconds: float = Field(default=30.0, gt=0)
+    llama_server_stream_event_max_bytes: int = Field(default=1_048_576, gt=0)
     public_model: str = Field(default="local-model", min_length=1)
 
     @classmethod
@@ -24,6 +26,12 @@ class Settings(BaseModel):
         variable_names = {
             "LLAMA_SERVER_BASE_URL": "llama_server_base_url",
             "LLAMA_SERVER_TIMEOUT_SECONDS": "llama_server_timeout_seconds",
+            "LLAMA_SERVER_STREAM_IDLE_TIMEOUT_SECONDS": (
+                "llama_server_stream_idle_timeout_seconds"
+            ),
+            "LLAMA_SERVER_STREAM_EVENT_MAX_BYTES": (
+                "llama_server_stream_event_max_bytes"
+            ),
             "LLM_PLATFORM_MODEL": "public_model",
         }
         for environment_name, field_name in variable_names.items():

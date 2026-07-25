@@ -38,6 +38,12 @@ def create_app(
             backend = LlamaCppBackend(
                 client=client,
                 base_url=resolved_settings.backend_base_url,
+                stream_idle_timeout_seconds=(
+                    resolved_settings.llama_server_stream_idle_timeout_seconds
+                ),
+                stream_event_max_bytes=(
+                    resolved_settings.llama_server_stream_event_max_bytes
+                ),
             )
             app.state.settings = resolved_settings
             app.state.backend = backend

@@ -6,6 +6,14 @@ from pydantic import ValidationError
 from llm_platform.config import Settings
 
 
-def test_non_positive_timeout_is_rejected() -> None:
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("llama_server_timeout_seconds", 0),
+        ("llama_server_stream_idle_timeout_seconds", 0),
+        ("llama_server_stream_event_max_bytes", 0),
+    ],
+)
+def test_non_positive_stream_limits_are_rejected(field: str, value: int) -> None:
     with pytest.raises(ValidationError):
-        Settings(llama_server_timeout_seconds=0)
+        Settings.model_validate({field: value})

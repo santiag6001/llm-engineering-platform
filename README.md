@@ -10,10 +10,10 @@ repeatable performance measurement. It is deliberately small enough to study
 and modify. It is not intended to compete with inference engines such as vLLM
 or SGLang.
 
-Phase 1 is implemented: the repository contains a locally runnable FastAPI
-service with health checks, model discovery, and non-streaming chat completions
-forwarded to a separately running llama.cpp server. Later capabilities remain
-on the phased development plan.
+Phase 2 is implemented: the repository contains a locally runnable FastAPI
+service with health checks, model discovery, and buffered or SSE-streaming chat
+completions forwarded to a separately running llama.cpp server. Later
+capabilities remain on the phased development plan.
 
 ## Goals
 
@@ -50,15 +50,14 @@ The first compatibility target is:
   responses
 - `GET /metrics`
 
-The currently implemented Phase 1 subset is:
+The currently implemented Phase 2 subset is:
 
 - `GET /health` and `GET /health/live` for process-local liveness;
 - `GET /ready` and `GET /health/ready` for a live llama-server probe;
 - `GET /v1/models` for the configured public model;
-- `POST /v1/chat/completions` for non-streaming requests only.
+- `POST /v1/chat/completions` for buffered and SSE-streaming requests.
 
-`stream=true` is rejected with HTTP 400. Metrics and the other planned
-capabilities are not implemented yet.
+Metrics and the other planned capabilities are not implemented yet.
 
 OpenAI compatibility is a versioned, tested contract rather than a claim that
 all OpenAI behavior is supported. Unsupported fields and endpoints will be
@@ -166,7 +165,7 @@ The detailed entry criteria, deliverables, tests, and exit criteria are in the
 - [Metrics](docs/metrics.md): metric contract, labels, dashboards, and alerts
 - [Contributor/agent guidance](AGENTS.md): rules for future implementation work
 
-## Phase 1 local run
+## Local run
 
 Python 3.12 or newer is required. On Ubuntu 24.04/WSL2, create an isolated
 environment and install the application plus development checks:
@@ -209,9 +208,12 @@ uvicorn llm_platform.main:app --host 127.0.0.1 --port 8000
 ```
 
 `LLAMA_SERVER_BASE_URL` defaults to `http://127.0.0.1:8080`,
-`LLAMA_SERVER_TIMEOUT_SECONDS` defaults to 120 seconds, and
+`LLAMA_SERVER_TIMEOUT_SECONDS` defaults to 120 seconds,
+`LLAMA_SERVER_STREAM_IDLE_TIMEOUT_SECONDS` defaults to 30 seconds,
+`LLAMA_SERVER_STREAM_EVENT_MAX_BYTES` defaults to 1 MiB, and
 `LLM_PLATFORM_MODEL` defaults to `local-model`. Settings are validated at
-startup. The timeout covers the complete buffered backend request. Generation
+startup. The buffered timeout continues to cover backend HTTP operations; the
+stream idle timeout applies independently between upstream reads. Generation
 requests are never retried automatically.
 
 Check the service and send a completion:
@@ -228,7 +230,7 @@ curl http://127.0.0.1:8000/v1/chat/completions \
   }'
 ```
 
-Run all Phase 1 checks:
+Run all checks:
 
 ```bash
 ruff format --check .
@@ -289,18 +291,17 @@ curl --fail http://127.0.0.1:8000/v1/chat/completions \
 ```
 
 This smoke test checks platform integration and response handling; the answer
-quality of this small model is not a platform correctness signal. Phase 1
-supports non-streaming requests only, and rejects `stream=true`.
+quality of this small model is not a platform correctness signal.
 
 ### Supported chat completion fields
 
-| Field | Phase 1 behavior |
+| Field | Phase 2 behavior |
 |---|---|
 | `model` | Required and forwarded |
 | `messages` | Required; `system`, `user`, and `assistant` text messages |
 | `temperature` | Optional and forwarded |
 | `max_tokens` | Optional and forwarded |
-| `stream` | Optional; `false` is forwarded, `true` is rejected |
+| `stream` | Optional; `false` returns JSON and `true` returns SSE |
 | Any other field | Rejected rather than silently ignored |
 
 Successful responses are validated as OpenAI-shaped JSON and retain
@@ -309,9 +310,91 @@ upstream 5xx, invalid JSON/shape, timeouts, and connection failures are mapped
 to stable gateway errors without exposing Python exception details or raw
 backend bodies.
 
-Phase 1 intentionally has no streaming, queue, concurrency limit,
-authentication, rate limiting, Prometheus/Grafana, Docker, or Kubernetes.
+Phase 2 intentionally has no request queue, concurrency limit, authentication,
+rate limiting, Prometheus/Grafana, Docker, or Kubernetes.
+
+## Phase 2 Streaming
+
+### Architecture
+
+Streaming follows the existing ports-and-adapters boundaries:
+
+```text
+FastAPI route -> CompletionService -> InferenceBackend port
+              -> LlamaCppBackend -> llama-server SSE
+```
+
+The llama.cpp adapter owns the upstream HTTP response and incrementally parses
+bounded SSE events into backend-neutral chunks. The completion service owns
+stream timing and terminal logging. The API layer serializes those chunks into
+OpenAI-compatible SSE frames. Each layer awaits the next layer directly, so a
+slow client applies backpressure without an unbounded queue or a background
+producer task. Closing or cancelling the downstream iterator closes the
+upstream response.
+
+TTFT is measured from the start of the backend stream operation to the first
+chunk containing non-empty assistant content. Every stream writes one terminal
+structured log record containing `request_id`, `ttft_seconds` (or `null` when
+no content arrived), `stream_duration_seconds`, and `outcome`. Prometheus
+metrics are intentionally deferred.
+
+### Supported API
+
+`POST /v1/chat/completions` accepts the same supported fields for buffered and
+streaming calls. With `"stream": true`, a successful response has
+`Content-Type: text/event-stream`, emits each OpenAI
+`chat.completion.chunk` as `data: {json}`, and terminates exactly once with:
+
+```text
+data: [DONE]
+
+```
+
+The response is not accumulated before delivery. Unicode and events split
+across HTTP transport reads are supported. A malformed, truncated, timed-out,
+or disconnected upstream stream emits a stable OpenAI-shaped SSE error frame
+after headers have been sent, closes the response, and never emits `[DONE]`.
+Backend HTTP or transport failures detected before streaming headers use the
+normal OpenAI-shaped JSON error response.
+
+### Streaming example
+
+A successful response has this shape:
+
+```text
+data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1700000000,"model":"local-model","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1700000000,"model":"local-model","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+
+data: [DONE]
+
+```
+
+Use `curl --no-buffer` to display events as they arrive:
+
+```bash
+curl --no-buffer http://127.0.0.1:8000/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{
+    "model": "local-model",
+    "messages": [{"role": "user", "content": "Count to three briefly."}],
+    "stream": true
+  }'
+```
+
+### Limitations
+
+- Compatibility covers only the request fields listed above and OpenAI-style
+  chat completion chunks; unsupported fields are rejected.
+- There are no heartbeat events or automatic generation retries.
+- The stream idle timeout is per upstream read, not a total generation
+  deadline. The total stream duration can therefore exceed it while chunks
+  continue to arrive.
+- SSE events larger than `LLAMA_SERVER_STREAM_EVENT_MAX_BYTES` are rejected to
+  keep parser memory bounded.
+- Queueing, concurrency limits, authentication, rate limiting, metrics,
+  dashboards, containers, and orchestration remain later phases.
 
 ## Current status
 
-Phase 1 non-streaming API implemented. Phase 2 streaming has not started.
+Phase 2 buffered and SSE-streaming chat completions implemented.
