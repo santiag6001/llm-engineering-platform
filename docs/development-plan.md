@@ -180,7 +180,53 @@ non-zero when any configured required gate fails.
 The roadmap insertion and its effect on later numbering are recorded in
 [ADR 0001](adr/0001-phase-4-evaluation-roadmap.md).
 
-## 7. Phase 5 — Bounded queue and concurrency control
+## 7. Phase 5 — Reproducible containerized deployment and CI/CD
+
+**Status: complete.**
+
+**Working system:** a reproducible non-root gateway image runs through Docker
+Compose, optional Prometheus scrapes its process-local metrics, an optional
+CPU llama-server uses a user-mounted GGUF file, and CI validates the repository
+without a model or live backend.
+
+### Deliverables
+
+- Multi-stage Python 3.12 gateway image with an exact runtime dependency lock,
+  an unprivileged runtime identity, exec-form Uvicorn command, and liveness
+  health check.
+- Build-context exclusions for tests, Git metadata, models, environments,
+  caches, evaluations, and reports.
+- Base Compose gateway and optional Prometheus profile.
+- Optional llama-server overlay/profile with a required read-only host GGUF
+  mount and CPU-compatible defaults.
+- Checked-in minimal Prometheus scrape configuration with no remote write.
+- Deterministic model-free container smoke helper.
+- Least-privilege GitHub Actions quality and image validation.
+- Deployment, configuration precedence, health/readiness, evaluation, and
+  troubleshooting documentation.
+
+### Tests
+
+- Static contracts cover the non-root image, exec command, build exclusions,
+  Compose safety assumptions, required model mount, and Prometheus target.
+- The smoke helper contract covers live health, Prometheus text, unavailable
+  readiness, and absence of client-visible tracebacks.
+- CI runs format, lint, mypy, the full pytest suite, dependency checks,
+  evaluation CLI help, whitespace validation, Compose rendering, image build,
+  and the container smoke test.
+
+### Exit criteria
+
+The complete offline Python suite passes without a model or live backend. On a
+Docker-capable host, the base Compose configuration renders, the gateway image
+builds, and the model-free container starts, reports liveness and unavailable
+readiness correctly, exposes metrics, and exits cleanly. A local model remains
+an explicit optional integration.
+
+The roadmap insertion and its effect on later numbering are recorded in
+[ADR 0002](adr/0002-phase-5-deployment-before-scheduling.md).
+
+## 8. Phase 6 — Bounded queue and concurrency control
 
 **Working system:** requests above the active limit wait in a bounded FIFO
 queue; overload is rejected predictably; cancellation frees capacity.
@@ -212,7 +258,7 @@ A load scenario demonstrates a bounded active count, a bounded queue, and
 predictable rejection. After the scenario, active and queued counts return to
 zero.
 
-## 8. Phase 6 — Resilience and process lifecycle
+## 9. Phase 7 — Resilience and process lifecycle
 
 **Working system:** the service behaves predictably during backend failure,
 startup, and shutdown while preserving established API and scheduling behavior.
@@ -243,41 +289,35 @@ startup, and shutdown while preserving established API and scheduling behavior.
 Automated integration tests can kill or stall the fake backend and initiate
 shutdown without hanging the API or leaking tasks.
 
-## 9. Phase 7 — Docker Compose, Prometheus, and Grafana
+## 10. Phase 8 — Grafana and operational deployment extensions
 
-**Working system:** one documented Docker Compose command starts the API,
-llama.cpp, Prometheus, and Grafana with provisioned health checks and dashboard.
+**Working system:** the established Compose deployment gains a provisioned
+Grafana dashboard and operational real-model acceptance checks after runtime
+scheduling and lifecycle behavior are complete.
 
 ### Deliverables
 
-- Reproducible, pinned API container build running as a non-root user.
-- llama.cpp server configuration suitable for CPU inference.
-- Compose services, private networking, volumes, health checks, and shutdown
-  grace periods.
-- Read-only host model mount with an explicit configuration variable.
-- Prometheus scrape configuration.
 - Provisioned Grafana data source and version-controlled dashboard.
 - Dashboard panels and initial alert expressions described in
   [Metrics](metrics.md).
-- A Compose environment example containing no secrets or machine-specific
-  absolute paths.
+- Operational extensions to the Phase 5 Compose services without weakening
+  their non-root, model-mount, or secret-handling rules.
 
 ### Tests
 
-- Container image build and configuration validation.
-- Compose configuration rendering.
-- Smoke test: services become healthy, models endpoint works, one buffered and
-  one streamed completion work, Prometheus target is up, and Grafana provisions
-  the dashboard.
+- Optional real-model smoke: services become ready, models endpoint works, one
+  buffered and one streamed completion work, Prometheus target is up, and
+  Grafana provisions the dashboard.
 - Restart behavior preserves required dashboard data/configuration.
 - SIGTERM honors the documented drain behavior.
 
 ### Exit criteria
 
 A fresh Ubuntu 24.04/WSL2 environment with Docker and a supplied compatible GGUF
-model can follow the README to reach a healthy, observable deployment.
+model can follow the README to reach a ready deployment with a provisioned
+dashboard and validated shutdown behavior.
 
-## 10. Phase 8 — Reproducible benchmarks
+## 11. Phase 9 — Reproducible benchmarks
 
 **Working system:** a benchmark runner sends defined workloads, validates
 responses, and writes results with enough metadata to repeat and compare runs.
@@ -311,7 +351,7 @@ Two runs with the same inputs are structurally comparable, and the report makes
 hardware/model/config differences obvious. No baseline performance claim is
 published without its metadata.
 
-## 11. Phase 9 — Release hardening
+## 12. Phase 10 — Release hardening
 
 **Working system:** the complete educational platform can be cloned, validated,
 operated, and studied from its documentation.
@@ -342,9 +382,9 @@ operated, and studied from its documentation.
 All documented acceptance checks pass, known limitations are explicit, and a
 new contributor can reproduce both the deployment and a benchmark.
 
-## 12. Deferred roadmap
+## 13. Deferred roadmap
 
-The following begin only after Phase 9, each as another independently working
+The following begin only after Phase 10, each as another independently working
 vertical increment:
 
 1. API-key authentication and principal context.

@@ -67,22 +67,22 @@ boundaries that need contract tests, failure injection, or future replacement.
 
 ## 3. Runtime topology
 
-The initial Docker Compose deployment contains four processes:
+The Phase 5 base Docker Compose deployment contains:
 
-1. **API service:** FastAPI application, in-memory admission queue, concurrency
-   scheduler, backend adapter, and `/metrics`.
-2. **llama.cpp server:** one configured GGUF model and its inference runtime.
-3. **Prometheus:** scrapes the API service.
-4. **Grafana:** reads Prometheus and loads a provisioned dashboard.
+1. **Gateway:** one Uvicorn/FastAPI process, the backend adapter, and
+   `/metrics`.
+2. **Prometheus:** an optional profile that scrapes the gateway.
 
-The API and llama.cpp services communicate over a private Compose network.
-Only the API, Grafana, and optionally Prometheus debugging port are exposed to
-the host. The model file is mounted read-only and is not built into an image.
+By default the gateway reaches a separately managed host llama-server through
+`host.docker.internal`. An optional Compose overlay adds a CPU llama-server on
+the project network and requires one user-supplied GGUF file mounted read-only.
+The model is never built into an image or downloaded automatically. Gateway
+and Prometheus ports bind to host loopback. Grafana remains a later operational
+extension.
 
-The initial scheduler is process-local. Consequently the API must run as one
-process/worker when strict global queue and concurrency limits are required.
-Starting multiple Uvicorn workers creates one queue and one limit per worker.
-This limitation will be documented in deployment configuration and metrics.
+The gateway is one process/worker, so metrics are process-local. There is no
+request scheduler, queue, or concurrency limit in Phase 5; those remain future
+application-layer work and are not implied by the container configuration.
 
 Evaluation is not part of this runtime topology. The Phase 4 evaluation tool is
 a separate command-line client that sends buffered requests through the public
@@ -199,12 +199,11 @@ specified in [Metrics](metrics.md).
 Deployment artifacts own:
 
 - container build and non-root process configuration;
-- health checks and startup ordering based on readiness, not arbitrary sleeps;
+- liveness-based container health plus documented backend readiness;
 - environment-driven settings and secrets injection points;
-- resource and shutdown settings;
-- read-only model mounts and persistent Grafana data;
+- basic resource-hardening and shutdown settings;
+- optional read-only model mounts;
 - Prometheus scrape configuration;
-- provisioned Grafana data source and dashboard;
 - version pinning and image/model provenance.
 
 Deployment configuration does not contain application policy that cannot also
@@ -375,9 +374,10 @@ Shutdown:
 
 ## 8. Configuration
 
-Settings are typed, validated at startup, and loaded from environment variables
-with optional local `.env` convenience. Secrets are never committed or emitted
-in logs.
+Settings are typed, validated at startup, and loaded from process environment
+variables. Compose may interpolate a local environment or `--env-file`, but the
+application does not load `.env` itself. Secrets are never committed or
+emitted in logs.
 
 Configuration groups:
 
@@ -405,8 +405,10 @@ metrics, but never high-cardinality or sensitive values.
   permit leaks, and shutdown under concurrency.
 - **Integration tests:** FastAPI to a small fake backend on every change; optional
   real llama.cpp/model tests behind an explicit marker.
-- **Deployment smoke tests:** Compose health, one buffered request, one streamed
-  request, Prometheus target health, and Grafana provisioning.
+- **Deployment smoke tests:** model-free Compose liveness, unavailable
+  readiness, metrics exposition, traceback-free client responses, and clean
+  termination; real-model buffered/streaming checks remain explicit and
+  optional.
 - **Load tests:** fixed scenarios with machine/model/config metadata and
   correctness assertions in addition to latency/throughput.
 - **Evaluation tests:** strict dataset fixtures, deterministic lexical

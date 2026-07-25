@@ -4,9 +4,10 @@
 
 This document is the source of truth for the Phase 3 application metrics
 contract. Metrics describe public HTTP traffic and validated chat completion
-lifecycles for buffered and streaming requests. Queueing, concurrency limits,
-Grafana, deployment, alerts, and backend-native llama.cpp metrics are not part
-of this phase.
+lifecycles for buffered and streaming requests. Phase 5 deploys a minimal
+Prometheus scraper without changing this contract. Queueing, concurrency
+limits, Grafana, alerts, and backend-native llama.cpp metrics remain outside
+the metrics implementation.
 
 Each FastAPI application owns a private prometheus-client
 `CollectorRegistry`. The composition root supplies a backend-neutral metrics
@@ -209,8 +210,8 @@ collector operations deterministic.
 - Queue depth, queue wait, concurrency limits, readiness, build info, input
   tokens, missing-usage counters, and backend-native metrics are not yet
   exposed.
-- Prometheus deployment, Grafana dashboards, recording rules, and alerts are
-  later-phase work.
+- Phase 5 provides an optional single-target Prometheus deployment. Grafana
+  dashboards, recording rules, and alerts remain later-phase work.
 
 ## 10. Correctness tests
 

@@ -1,0 +1,37 @@
+services:
+  gateway:
+    environment:
+      LLAMA_SERVER_BASE_URL: http://llama-server:8080
+    depends_on:
+      llama-server:
+        condition: service_started
+
+  llama-server:
+    image: ${LLAMA_SERVER_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-b10121@sha256:d7eaa77a9836f3ad476322bcc81cb12d6d699ed057e630c87f38b83185214631}
+    profiles:
+      - inference
+    user: "10001:10001"
+    command:
+      - --model
+      - /models/model.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --ctx-size
+      - ${LLAMA_CONTEXT_SIZE:-2048}
+      - --threads
+      - ${LLAMA_THREADS:-4}
+    volumes:
+      - type: bind
+        source: ${LLAMA_MODEL_PATH:?Set LLAMA_MODEL_PATH to an existing local GGUF file}
+        target: /models/model.gguf
+        read_only: true
+    stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

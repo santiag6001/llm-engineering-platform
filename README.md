@@ -10,12 +10,13 @@ repeatable performance measurement. It is deliberately small enough to study
 and modify. It is not intended to compete with inference engines such as vLLM
 or SGLang.
 
-Phase 4 is implemented: the repository contains a locally runnable FastAPI
+Phase 5 is implemented: the repository contains a locally runnable FastAPI
 service with health checks, model discovery, and buffered or SSE-streaming chat
 completions forwarded to a separately running llama.cpp server, plus
 Prometheus-compatible production metrics and a separate deterministic
-evaluation/regression CLI. Later capabilities remain on the phased development
-plan.
+evaluation/regression CLI. It also provides a reproducible non-root gateway
+image, Docker Compose deployment, Prometheus scraping, and deterministic CI.
+Later capabilities remain on the phased development plan.
 
 ## Goals
 
@@ -132,10 +133,12 @@ without invalidating earlier behavior:
 3. End-to-end streaming
 4. Production observability
 5. LLM evaluation and regression
-6. Bounded queue and concurrency control
-7. Production error handling and lifecycle management
-8. Prometheus, Grafana, and Docker Compose
-9. Reproducible benchmarks and documentation hardening
+6. Reproducible containerized deployment and CI/CD
+7. Bounded queue and concurrency control
+8. Production error handling and lifecycle management
+9. Grafana and operational deployment extensions
+10. Reproducible benchmarks
+11. Release hardening
 
 The detailed entry criteria, deliverables, tests, and exit criteria are in the
 [Development plan](docs/development-plan.md).
@@ -168,6 +171,8 @@ The detailed entry criteria, deliverables, tests, and exit criteria are in the
   cardinality policy
 - [Evaluation](docs/evaluation.md): dataset, evaluator, report, and regression
   contracts
+- [Deployment](docs/deployment.md): image, Compose, health, Prometheus, and CI
+  behavior
 - [Contributor/agent guidance](AGENTS.md): rules for future implementation work
 
 ## Local run
@@ -480,8 +485,8 @@ bodies, and model file paths are never metric labels.
 
 ## Current status
 
-Phase 4 evaluation and regression is implemented alongside the unchanged
-Phase 1–3 serving runtime.
+Phase 5 containerized deployment and CI/CD is implemented alongside the
+unchanged Phase 1–4 runtime and evaluation behavior.
 
 ## Phase 4 Evaluation and Regression
 
@@ -629,3 +634,146 @@ Default CI must use mock transports and must not download a model.
   telemetry in this phase.
 - The example dataset demonstrates the schema; small local models are not
   expected to pass every case.
+
+## Phase 5 Deployment and CI/CD
+
+### Deployment architecture
+
+The checked-in deployment is intentionally small:
+
+```text
+host client -> gateway:8000 -> external llama-server
+                    |
+                    +-> /metrics <- optional Prometheus:9090
+
+optional overlay:
+gateway -> CPU llama-server:8080 -> read-only host GGUF
+```
+
+The gateway image contains only the installed application and pinned runtime
+dependencies. It runs one Uvicorn process as UID/GID `10001`, writes structured
+logs to stdout/stderr, handles `SIGTERM`, and has a 15-second Compose stop grace
+period. Queueing and concurrency limiting are not implemented in this phase.
+See [Deployment](docs/deployment.md) for the complete operational contract.
+
+Build the gateway image:
+
+```bash
+docker build -f deploy/docker/Dockerfile \
+  -t llm-production-platform-gateway:phase5 .
+```
+
+Start only the gateway, forwarding requests to a llama-server on the host:
+
+```bash
+LLAMA_SERVER_BASE_URL=http://host.docker.internal:8080 \
+docker compose up --build gateway
+```
+
+On Linux, Compose maps `host.docker.internal` through Docker's `host-gateway`.
+On WSL2 with Docker Desktop integration, the same name reaches the host-side
+service. Override `GATEWAY_PORT` when port 8000 is already in use.
+
+### Optional local GGUF backend
+
+The optional overlay uses a pinned CPU-compatible llama.cpp server image. It
+never downloads a model and refuses to render without `LLAMA_MODEL_PATH`:
+
+```bash
+LLAMA_MODEL_PATH=./models/your-model.gguf \
+docker compose -f compose.yaml -f compose.llama.yaml \
+  --profile inference up --build gateway llama-server
+```
+
+`LLAMA_MODEL_PATH` may be an absolute Linux path or a repository-relative path.
+From WSL2, prefer a path inside the Linux filesystem for predictable bind-mount
+performance. The file is mounted at `/models/model.gguf` read-only. Optional
+`LLAMA_THREADS` and `LLAMA_CONTEXT_SIZE` configure conservative CPU defaults;
+`LLAMA_SERVER_IMAGE` can select another deliberately reviewed llama.cpp image.
+No NVIDIA runtime, GPU, model download, or credential is used.
+
+### Health, readiness, and Prometheus
+
+`GET /health` and `GET /health/live` are process-local liveness endpoints.
+Docker uses `/health`; therefore gateway-only development remains healthy when
+the optional backend is absent. `GET /ready` and `GET /health/ready` probe the
+configured llama-server and return HTTP 503 with
+`{"status":"unavailable"}` until it can accept inference.
+
+Start the gateway and the optional Prometheus profile:
+
+```bash
+docker compose --profile observability up --build gateway prometheus
+```
+
+Prometheus listens on `127.0.0.1:9090` by default and scrapes
+`gateway:8000/metrics` every 15 seconds. It has no remote write or credentials.
+All gateway metrics remain process-local.
+
+Run the model-free container acceptance test:
+
+```bash
+python3 scripts/container_smoke.py
+```
+
+It builds and starts only the gateway, verifies liveness, Prometheus text,
+documented unavailable readiness, and traceback-free responses, sends
+`SIGTERM`, checks a clean exit, and removes its Compose resources.
+
+### Configuration
+
+Environment variables passed by the shell or a Compose `--env-file` override
+the defaults in `compose.yaml`; Compose then passes resolved values to the
+application, whose Pydantic settings validate them at startup. There is no
+application `.env` loader. The supported gateway variables are:
+
+- `LLAMA_SERVER_BASE_URL` (default in Compose:
+  `http://host.docker.internal:8080`);
+- `LLAMA_SERVER_TIMEOUT_SECONDS` (default `120`);
+- `LLAMA_SERVER_STREAM_IDLE_TIMEOUT_SECONDS` (default `30`);
+- `LLAMA_SERVER_STREAM_EVENT_MAX_BYTES` (default `1048576`); and
+- `LLM_PLATFORM_MODEL` (default `local-model`).
+
+No gateway value is secret today. Do not put credentials in a base URL,
+Compose file, committed `.env`, image build argument, or log. The optional
+backend requires `LLAMA_MODEL_PATH` only when its overlay is used.
+
+### Evaluation against Compose
+
+After readiness returns HTTP 200, run evaluation from the host:
+
+```bash
+llm-eval run \
+  --dataset evaluations/datasets/serving-concepts.jsonl \
+  --base-url http://127.0.0.1:8000 \
+  --model local-model \
+  --output-dir evaluations/reports
+```
+
+Review the generated report and compare it with an explicitly selected,
+reviewed baseline using `llm-eval compare`. Deployment never updates baselines
+and generated reports remain ignored unless intentionally curated.
+
+### CI validation
+
+Pull requests and pushes to `main` run two least-privilege jobs. The Python job
+installs Python 3.12, exact runtime/development locks, and the editable project,
+then checks Ruff formatting and lint, mypy, the complete pytest suite,
+`pip check`, all three evaluation CLI help surfaces, and whitespace. The
+container job renders the base Compose configuration, builds the gateway image,
+and runs the model-free container smoke test. CI requires no GPU, GGUF model,
+hosted API, running llama-server, secret, registry push, or cloud credential.
+
+### Troubleshooting and limitations
+
+- `/health` 200 with `/ready` 503 means the gateway is alive but the configured
+  backend is absent or unhealthy. Check the backend URL and its `/health`.
+- A missing-model interpolation error from the optional overlay means
+  `LLAMA_MODEL_PATH` was not set to an existing host GGUF file.
+- Bind or permission errors usually mean Docker cannot read the supplied model
+  path. On Docker Desktop, ensure the location is shared with Docker.
+- Prometheus is opt-in through the `observability` profile; gateway-only users
+  do not need it.
+- The deployment is unauthenticated, CPU-oriented, single-process, and has no
+  request queue, concurrency limiter, Grafana, Kubernetes, distributed
+  coordination, automatic model download, or image publishing pipeline.

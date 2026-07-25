@@ -1,0 +1,61 @@
+name: llm-production-platform
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+    image: llm-production-platform-gateway:phase5
+    init: true
+    environment:
+      LLAMA_SERVER_BASE_URL: ${LLAMA_SERVER_BASE_URL:-http://host.docker.internal:8080}
+      LLAMA_SERVER_TIMEOUT_SECONDS: ${LLAMA_SERVER_TIMEOUT_SECONDS:-120}
+      LLAMA_SERVER_STREAM_IDLE_TIMEOUT_SECONDS: ${LLAMA_SERVER_STREAM_IDLE_TIMEOUT_SECONDS:-30}
+      LLAMA_SERVER_STREAM_EVENT_MAX_BYTES: ${LLAMA_SERVER_STREAM_EVENT_MAX_BYTES:-1048576}
+      LLM_PLATFORM_MODEL: ${LLM_PLATFORM_MODEL:-local-model}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    stop_grace_period: 15s
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles:
+      - observability
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  prometheus-data:
