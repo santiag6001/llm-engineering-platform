@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from typing import cast
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from llm_platform.api.schemas import (
     ChatCompletionRequest,
@@ -30,6 +30,7 @@ from llm_platform.domain.errors import (
     BackendUnavailableError,
 )
 from llm_platform.domain.models import CompletionCommand, Message
+from llm_platform.observability import PrometheusMetrics
 
 router = APIRouter()
 
@@ -118,6 +119,17 @@ async def ready(request: Request) -> HealthResponse | JSONResponse:
 async def models(request: Request) -> ModelsResponse:
     settings = cast(Settings, request.app.state.settings)
     return ModelsResponse(data=[ModelObject(id=settings.public_model)])
+
+
+@router.get("/metrics", include_in_schema=False)
+async def metrics(request: Request) -> Response:
+    """Expose this process's isolated Prometheus registry."""
+
+    prometheus = cast(PrometheusMetrics, request.app.state.metrics)
+    return Response(
+        content=prometheus.render(),
+        media_type=prometheus.content_type,
+    )
 
 
 @router.post(

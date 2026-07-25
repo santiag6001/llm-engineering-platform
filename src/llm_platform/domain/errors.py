@@ -19,6 +19,18 @@ class BackendProtocolError(BackendError):
     """The backend returned an invalid response."""
 
 
+class BackendDisconnectedError(BackendProtocolError):
+    """The backend disconnected or violated the HTTP transport protocol."""
+
+
+class BackendMalformedResponseError(BackendProtocolError):
+    """A buffered backend response was malformed."""
+
+
+class BackendMalformedStreamError(BackendProtocolError):
+    """An upstream SSE response was malformed or truncated."""
+
+
 class BackendHTTPError(BackendError):
     """The backend returned a non-success HTTP response."""
 

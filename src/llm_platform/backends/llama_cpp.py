@@ -12,8 +12,11 @@ import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from llm_platform.domain.errors import (
+    BackendDisconnectedError,
     BackendError,
     BackendHTTPError,
+    BackendMalformedResponseError,
+    BackendMalformedStreamError,
     BackendProtocolError,
     BackendTimeoutError,
     BackendUnavailableError,
@@ -107,7 +110,7 @@ class LlamaCppBackend:
             completion = _UpstreamCompletion.model_validate(decoded)
         except (ValueError, ValidationError) as exc:
             logger.warning("backend returned an invalid completion response")
-            raise BackendProtocolError from exc
+            raise BackendMalformedResponseError from exc
 
         return CompletionResult(
             payload=completion.model_dump(mode="json", exclude_unset=True)
@@ -140,7 +143,7 @@ class LlamaCppBackend:
                     "text/event-stream"
                 ):
                     logger.warning("backend stream returned unexpected content type")
-                    raise BackendProtocolError
+                    raise BackendMalformedStreamError
                 yield self._iter_sse_chunks(response)
         except (
             BackendHTTPError,
@@ -242,14 +245,14 @@ class LlamaCppBackend:
             return BackendTimeoutError()
         if isinstance(exc, httpx.ProtocolError):
             logger.warning("backend returned an invalid HTTP response")
-            return BackendProtocolError()
+            return BackendDisconnectedError()
         logger.warning("backend connection failed")
         return BackendUnavailableError()
 
     @staticmethod
-    def _malformed_stream(reason: str) -> BackendProtocolError:
+    def _malformed_stream(reason: str) -> BackendMalformedStreamError:
         logger.warning("backend returned a malformed SSE stream reason=%s", reason)
-        return BackendProtocolError()
+        return BackendMalformedStreamError()
 
     @staticmethod
     def _http_error(response: httpx.Response) -> BackendHTTPError:

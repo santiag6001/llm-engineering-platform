@@ -10,10 +10,11 @@ repeatable performance measurement. It is deliberately small enough to study
 and modify. It is not intended to compete with inference engines such as vLLM
 or SGLang.
 
-Phase 2 is implemented: the repository contains a locally runnable FastAPI
+Phase 3 is implemented: the repository contains a locally runnable FastAPI
 service with health checks, model discovery, and buffered or SSE-streaming chat
-completions forwarded to a separately running llama.cpp server. Later
-capabilities remain on the phased development plan.
+completions forwarded to a separately running llama.cpp server, plus
+Prometheus-compatible production metrics. Later capabilities remain on the
+phased development plan.
 
 ## Goals
 
@@ -50,14 +51,13 @@ The first compatibility target is:
   responses
 - `GET /metrics`
 
-The currently implemented Phase 2 subset is:
+The currently implemented Phase 3 subset is:
 
 - `GET /health` and `GET /health/live` for process-local liveness;
 - `GET /ready` and `GET /health/ready` for a live llama-server probe;
 - `GET /v1/models` for the configured public model;
-- `POST /v1/chat/completions` for buffered and SSE-streaming requests.
-
-Metrics and the other planned capabilities are not implemented yet.
+- `POST /v1/chat/completions` for buffered and SSE-streaming requests; and
+- `GET /metrics` for bounded-cardinality Prometheus exposition.
 
 OpenAI compatibility is a versioned, tested contract rather than a claim that
 all OpenAI behavior is supported. Unsupported fields and endpoints will be
@@ -70,20 +70,18 @@ objects, and streaming termination.
 flowchart LR
     C[OpenAI-compatible client] -->|HTTP / SSE| A[FastAPI API]
     A --> P[Request pipeline]
-    P --> Q[Bounded admission queue]
-    Q --> S[Concurrency scheduler]
-    S --> B[llama.cpp backend adapter]
+    P --> B[llama.cpp backend adapter]
     B -->|HTTP / SSE| L[llama.cpp server]
     P -. observations .-> M[Metrics]
-    B -. observations .-> M
-    M --> PR[Prometheus]
-    PR --> G[Grafana]
+    M --> E[GET /metrics]
+    E -. optional scrape .-> PR[Prometheus]
 ```
 
 FastAPI owns the public protocol. The service layer owns request orchestration,
-queueing, cancellation, and concurrency policy. A backend adapter translates
-the internal request model to llama.cpp's API. Metrics observe these boundaries
-without controlling them.
+cancellation, timing, and terminal outcomes. A backend adapter translates the
+internal request model to llama.cpp's API. Metrics observe these boundaries
+without controlling them. Queueing and concurrency policy remain planned
+later-phase service responsibilities.
 
 See [Architecture](docs/architecture.md) for component boundaries and the
 complete request lifecycle.
@@ -129,9 +127,9 @@ without invalidating earlier behavior:
 1. Walking skeleton and health endpoints
 2. Non-streaming chat completion
 3. End-to-end streaming
-4. Bounded queue and concurrency control
-5. Production error handling and lifecycle management
-6. Metrics and structured logs
+4. Production observability
+5. Bounded queue and concurrency control
+6. Production error handling and lifecycle management
 7. Prometheus, Grafana, and Docker Compose
 8. Reproducible benchmarks and documentation hardening
 
@@ -162,7 +160,8 @@ The detailed entry criteria, deliverables, tests, and exit criteria are in the
   behavior, configuration, and extension points
 - [Development plan](docs/development-plan.md): independently testable delivery
   phases
-- [Metrics](docs/metrics.md): metric contract, labels, dashboards, and alerts
+- [Metrics](docs/metrics.md): metric names, labels, lifecycle semantics, and
+  cardinality policy
 - [Contributor/agent guidance](AGENTS.md): rules for future implementation work
 
 ## Local run
@@ -179,7 +178,8 @@ python -m pip install -e '.[dev]'
 
 Runtime dependencies are deliberately small: FastAPI provides the ASGI/API
 layer, Pydantic validates public and upstream boundaries, httpx provides the
-shared asynchronous backend client, and Uvicorn runs the ASGI process. The
+shared asynchronous backend client, prometheus-client owns the isolated
+metrics registry and exposition format, and Uvicorn runs the ASGI process. The
 optional `dev` group adds only pytest/pytest-asyncio for tests, Ruff for
 formatting/linting, and mypy for static type checking. Version ranges constrain
 each dependency to its current major release.
@@ -335,8 +335,7 @@ upstream response.
 TTFT is measured from the start of the backend stream operation to the first
 chunk containing non-empty assistant content. Every stream writes one terminal
 structured log record containing `request_id`, `ttft_seconds` (or `null` when
-no content arrived), `stream_duration_seconds`, and `outcome`. Prometheus
-metrics are intentionally deferred.
+no content arrived), `stream_duration_seconds`, and `outcome`.
 
 ### Supported API
 
@@ -392,9 +391,88 @@ curl --no-buffer http://127.0.0.1:8000/v1/chat/completions \
   continue to arrive.
 - SSE events larger than `LLAMA_SERVER_STREAM_EVENT_MAX_BYTES` are rejected to
   keep parser memory bounded.
-- Queueing, concurrency limits, authentication, rate limiting, metrics,
-  dashboards, containers, and orchestration remain later phases.
+- Queueing, concurrency limits, authentication, rate limiting, dashboards,
+  containers, and orchestration remain later phases.
+
+## Phase 3 Observability
+
+### Metrics architecture
+
+Each FastAPI application instance creates one private Prometheus
+`CollectorRegistry` during composition and exposes it through `GET /metrics`.
+The application completion service reports backend-neutral lifecycle events
+through a small metrics port; only the adapter under `observability` imports
+prometheus-client. This keeps Prometheus collectors out of the domain and
+backend adapters and makes every test application independent of
+process-global collector state.
+
+The completion service is the terminal lifecycle owner. It balances gauges in
+cleanup paths, records one terminal chat outcome, and uses the same bounded
+outcome vocabulary as structured stream logs. Metrics are passive
+observations: collector failures are logged and do not replace an inference
+result.
+
+### Using `/metrics`
+
+```bash
+curl --fail http://127.0.0.1:8000/metrics
+```
+
+A minimal Prometheus configuration for a Prometheus process running on the same
+host is:
+
+```yaml
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: llm-platform
+    static_configs:
+      - targets: ["127.0.0.1:8000"]
+```
+
+The metrics endpoint does not count its own scrapes. No Prometheus server or
+deployment files are included in this phase.
+
+### Key metrics
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `llm_platform_http_requests_total` | Counter | Completed HTTP traffic by normalized endpoint, method, and status class |
+| `llm_platform_chat_requests_total` | Counter | Exactly one terminal outcome per validated buffered or streaming chat request |
+| `llm_platform_generated_tokens_total` | Counter | Trusted backend-reported completion tokens |
+| `llm_platform_upstream_errors_total` | Counter | Upstream failures using a bounded error taxonomy |
+| `llm_platform_client_disconnects_total` | Counter | Completion lifecycles cancelled by client disconnect |
+| `llm_platform_request_duration_seconds` | Histogram | Validated request start through terminal cleanup |
+| `llm_platform_time_to_first_token_seconds` | Histogram | Backend start to first non-empty content chunk |
+| `llm_platform_upstream_duration_seconds` | Histogram | Backend start through upstream termination and cleanup |
+| `llm_platform_active_requests` | Gauge | Currently active completion lifecycles by mode |
+| `llm_platform_active_streams` | Gauge | Currently active streaming lifecycles |
+
+The complete label, timing, terminal-outcome, and histogram contract is in
+[Metrics](docs/metrics.md).
+
+### Label-cardinality policy
+
+Labels are fixed allowlisted values such as normalized endpoint, method,
+status class, `buffered`/`streaming` mode, terminal outcome, and normalized
+upstream error type. Request IDs remain available only in logs. Prompts,
+generated content, client identity, exception messages, raw paths, backend
+bodies, and model file paths are never metric labels.
+
+### Current limitations
+
+- Metrics are process-local. Multiple Uvicorn workers expose separate
+  registries and do not aggregate each other.
+- Token counts are emitted only when a validated backend response or stream
+  chunk supplies a non-negative integer `usage.completion_tokens`.
+- A client cancellation is classified as a disconnect in this phase because
+  graceful shutdown cancellation is not implemented yet.
+- Queue, concurrency, readiness, process-runtime, Grafana, alerting, and
+  llama.cpp-native metrics remain outside this phase.
 
 ## Current status
 
-Phase 2 buffered and SSE-streaming chat completions implemented.
+Phase 3 production observability implemented for buffered and SSE-streaming
+chat completions.

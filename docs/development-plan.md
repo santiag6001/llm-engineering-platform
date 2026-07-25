@@ -106,7 +106,38 @@ the client using OpenAI-compatible SSE and terminates correctly.
 A command-line client visibly receives tokens incrementally. Buffered behavior
 from Phase 1 is unchanged. All stream termination paths have contract tests.
 
-## 5. Phase 3 — Bounded queue and concurrency control
+## 5. Phase 3 — Application observability
+
+**Working system:** the API exposes useful, bounded-cardinality Prometheus
+metrics and correlated structured logs for every terminal request outcome.
+
+### Deliverables
+
+- Backend-neutral completion metrics port.
+- Prometheus counters, gauges, and histograms from
+  [the metrics contract](metrics.md).
+- `/metrics` endpoint and registry isolation for tests.
+- Time to first token, upstream duration, request duration, terminal outcome,
+  active work, client cancellation, upstream errors, and token usage when
+  reliable.
+- Log correlation using request ID and a shared outcome taxonomy.
+
+### Tests
+
+- Metric exposition names, types, and required labels.
+- Exactly one terminal request increment per request.
+- Gauge balance across success, failure, timeout, and cancellation.
+- TTFT observations use the documented first-content boundary.
+- No request ID, prompt, raw path, user input, or exception message appears as
+  a metric label.
+- Buffered and streaming behavior from Phases 1 and 2 remains unchanged.
+
+### Exit criteria
+
+A deterministic buffered and streaming scenario produces expected metric
+deltas, and a failed request can be correlated in logs using its request ID.
+
+## 6. Phase 4 — Bounded queue and concurrency control
 
 **Working system:** requests above the active limit wait in a bounded FIFO
 queue; overload is rejected predictably; cancellation frees capacity.
@@ -138,7 +169,7 @@ A load scenario demonstrates a bounded active count, a bounded queue, and
 predictable rejection. After the scenario, active and queued counts return to
 zero.
 
-## 6. Phase 4 — Resilience and process lifecycle
+## 7. Phase 5 — Resilience and process lifecycle
 
 **Working system:** the service behaves predictably during backend failure,
 startup, and shutdown while preserving established API and scheduling behavior.
@@ -168,37 +199,6 @@ startup, and shutdown while preserving established API and scheduling behavior.
 
 Automated integration tests can kill or stall the fake backend and initiate
 shutdown without hanging the API or leaking tasks.
-
-## 7. Phase 5 — Application observability
-
-**Working system:** the API exposes useful, bounded-cardinality Prometheus
-metrics and correlated structured logs for every terminal request outcome.
-
-### Deliverables
-
-- Lifecycle event vocabulary and telemetry port.
-- Prometheus counters, gauges, and histograms from
-  [the metrics contract](metrics.md).
-- `/metrics` endpoint and registry isolation for tests.
-- Queue delay, time to first token, backend duration, stream duration, request
-  outcome, active/queued work, and token/usage metrics when reliable.
-- Build/runtime information with safe labels.
-- Log correlation using request ID and a shared outcome taxonomy.
-
-### Tests
-
-- Metric exposition names, types, and required labels.
-- Exactly one terminal request increment per request.
-- Gauge balance across success, failure, timeout, and cancellation.
-- Histogram observations use the correct phase boundaries.
-- No request ID, prompt, raw path, user input, or unbounded model/backend value
-  appears as a metric label.
-- Metrics failures do not fail an inference request.
-
-### Exit criteria
-
-A deterministic scenario produces expected metric deltas, and a failed request
-can be correlated in logs using its request ID.
 
 ## 8. Phase 6 — Docker Compose, Prometheus, and Grafana
 

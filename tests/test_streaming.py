@@ -366,7 +366,7 @@ async def test_streaming_backend_http_error_is_json_before_sse_headers(
     assert any(
         "ttft_seconds=null" in record.message
         and "stream_duration_seconds=" in record.message
-        and "outcome=error" in record.message
+        and "outcome=backend_error" in record.message
         for record in caplog.records
     )
 
@@ -458,6 +458,29 @@ async def test_client_disconnect_cancels_and_closes_upstream(
         await asyncio.wait_for(app(scope, receive, send), timeout=1)
 
     assert upstream.closed.is_set()
+    metrics = app.state.metrics
+    assert (
+        metrics.registry.get_sample_value(
+            "llm_platform_client_disconnects_total",
+            {"mode": "streaming"},
+        )
+        == 1
+    )
+    assert (
+        metrics.registry.get_sample_value(
+            "llm_platform_upstream_errors_total",
+            {"mode": "streaming", "error_type": "cancelled"},
+        )
+        == 1
+    )
+    assert (
+        metrics.registry.get_sample_value(
+            "llm_platform_active_requests",
+            {"mode": "streaming"},
+        )
+        == 0
+    )
+    assert metrics.registry.get_sample_value("llm_platform_active_streams") == 0
     assert any(message["type"] == "http.response.start" for message in sent)
     assert not any(
         message["type"] == "http.response.body"

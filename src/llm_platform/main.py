@@ -18,6 +18,7 @@ from llm_platform.api.schemas import ErrorDetail, ErrorResponse
 from llm_platform.application.completions import CompletionService
 from llm_platform.backends.llama_cpp import LlamaCppBackend
 from llm_platform.config import Settings
+from llm_platform.observability import PrometheusMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ def create_app(
     """Build an application with lifecycle-managed dependencies."""
 
     resolved_settings = settings or Settings.from_environment()
+    metrics = PrometheusMetrics()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -47,7 +49,11 @@ def create_app(
             )
             app.state.settings = resolved_settings
             app.state.backend = backend
-            app.state.completion_service = CompletionService(backend)
+            app.state.metrics = metrics
+            app.state.completion_service = CompletionService(
+                backend,
+                metrics=metrics,
+            )
             logger.info("application started")
             yield
             logger.info("application stopped")
@@ -74,6 +80,13 @@ def create_app(
         response.headers["x-request-id"] = request_id
         route = request.scope.get("route")
         route_path = getattr(route, "path", "unmatched")
+        endpoint = _normalized_endpoint(route_path)
+        if endpoint != "metrics":
+            metrics.observe_http_request(
+                endpoint=endpoint,
+                method=_normalized_method(request.method),
+                status_class=_normalized_status_class(response.status_code),
+            )
         logger.info(
             "request completed request_id=%s method=%s route=%s status=%d",
             request_id,
@@ -98,6 +111,27 @@ def create_app(
 
     app.include_router(router)
     return app
+
+
+def _normalized_endpoint(route_path: str) -> str:
+    if route_path == "/v1/chat/completions":
+        return "chat_completions"
+    if route_path == "/v1/models":
+        return "models"
+    if route_path in {"/health", "/health/live", "/ready", "/health/ready"}:
+        return "health"
+    if route_path == "/metrics":
+        return "metrics"
+    return "unmatched"
+
+
+def _normalized_method(method: str) -> str:
+    return method if method in {"GET", "POST"} else "OTHER"
+
+
+def _normalized_status_class(status_code: int) -> str:
+    status_class = status_code // 100
+    return f"{status_class}xx" if status_class in {2, 4, 5} else "other"
 
 
 app = create_app()
