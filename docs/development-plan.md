@@ -137,7 +137,50 @@ metrics and correlated structured logs for every terminal request outcome.
 A deterministic buffered and streaming scenario produces expected metric
 deltas, and a failed request can be correlated in logs using its request ID.
 
-## 6. Phase 4 — Bounded queue and concurrency control
+## 6. Phase 4 — LLM evaluation and regression
+
+**Status: complete.**
+
+**Working system:** a standalone CLI loads versioned evaluation data, sends
+bounded buffered requests through the public chat endpoint, applies
+deterministic evaluators, writes reproducible reports, and gates regressions.
+
+### Deliverables
+
+- Strict versioned JSONL datasets with stable case IDs and SHA-256 identity.
+- Deterministic exact, containment, forbidden-string, non-empty, and
+  response-length evaluators with explicit normalization.
+- Fixed-size asynchronous worker pool with deterministic result ordering,
+  per-request timeout, no retries, and typed safe outcomes.
+- JSON schema version `1.0` reports and bounded Markdown summaries.
+- End-to-end latency and backend-reported token aggregation; buffered mode
+  explicitly reports no TTFT.
+- Baseline gates for pass rate, pass-rate drop, error rate, absolute P95
+  latency, and relative P95 latency increase.
+- `llm-eval run` and `llm-eval compare` with stable process exit codes.
+
+### Tests
+
+- Dataset parsing, strict validation, duplicate IDs, and hash stability.
+- All evaluator success/failure and normalization semantics.
+- Worker ordering, concurrency bound, HTTP/transport/malformed/evaluator
+  failures, and continuation after a failed case.
+- Aggregate statistics, nearest-rank percentiles, JSON/Markdown output,
+  bounded previews, and optional Git metadata.
+- Every regression gate, missing metrics, simultaneous failures, and CLI exit
+  behavior.
+- Complete Phase 1–3 runtime regression suite.
+
+### Exit criteria
+
+The fully offline suite validates the framework without a real model or
+network server. A run produces both report formats, and a comparison exits
+non-zero when any configured required gate fails.
+
+The roadmap insertion and its effect on later numbering are recorded in
+[ADR 0001](adr/0001-phase-4-evaluation-roadmap.md).
+
+## 7. Phase 5 — Bounded queue and concurrency control
 
 **Working system:** requests above the active limit wait in a bounded FIFO
 queue; overload is rejected predictably; cancellation frees capacity.
@@ -169,7 +212,7 @@ A load scenario demonstrates a bounded active count, a bounded queue, and
 predictable rejection. After the scenario, active and queued counts return to
 zero.
 
-## 7. Phase 5 — Resilience and process lifecycle
+## 8. Phase 6 — Resilience and process lifecycle
 
 **Working system:** the service behaves predictably during backend failure,
 startup, and shutdown while preserving established API and scheduling behavior.
@@ -200,7 +243,7 @@ startup, and shutdown while preserving established API and scheduling behavior.
 Automated integration tests can kill or stall the fake backend and initiate
 shutdown without hanging the API or leaking tasks.
 
-## 8. Phase 6 — Docker Compose, Prometheus, and Grafana
+## 9. Phase 7 — Docker Compose, Prometheus, and Grafana
 
 **Working system:** one documented Docker Compose command starts the API,
 llama.cpp, Prometheus, and Grafana with provisioned health checks and dashboard.
@@ -234,7 +277,7 @@ llama.cpp, Prometheus, and Grafana with provisioned health checks and dashboard.
 A fresh Ubuntu 24.04/WSL2 environment with Docker and a supplied compatible GGUF
 model can follow the README to reach a healthy, observable deployment.
 
-## 9. Phase 7 — Reproducible benchmarks
+## 10. Phase 8 — Reproducible benchmarks
 
 **Working system:** a benchmark runner sends defined workloads, validates
 responses, and writes results with enough metadata to repeat and compare runs.
@@ -268,7 +311,7 @@ Two runs with the same inputs are structurally comparable, and the report makes
 hardware/model/config differences obvious. No baseline performance claim is
 published without its metadata.
 
-## 10. Phase 8 — Release hardening
+## 11. Phase 9 — Release hardening
 
 **Working system:** the complete educational platform can be cloned, validated,
 operated, and studied from its documentation.
@@ -299,9 +342,9 @@ operated, and studied from its documentation.
 All documented acceptance checks pass, known limitations are explicit, and a
 new contributor can reproduce both the deployment and a benchmark.
 
-## 11. Deferred roadmap
+## 12. Deferred roadmap
 
-The following begin only after Phase 8, each as another independently working
+The following begin only after Phase 9, each as another independently working
 vertical increment:
 
 1. API-key authentication and principal context.

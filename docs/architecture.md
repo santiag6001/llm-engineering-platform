@@ -84,6 +84,11 @@ process/worker when strict global queue and concurrency limits are required.
 Starting multiple Uvicorn workers creates one queue and one limit per worker.
 This limitation will be documented in deployment configuration and metrics.
 
+Evaluation is not part of this runtime topology. The Phase 4 evaluation tool is
+a separate command-line client that sends buffered requests through the public
+OpenAI-compatible endpoint. The serving application does not import the
+evaluation package, and evaluation failures cannot alter API process state.
+
 ## 4. Component responsibilities
 
 ### 4.1 API layer
@@ -205,6 +210,22 @@ Deployment artifacts own:
 Deployment configuration does not contain application policy that cannot also
 be set and validated by the application. Kubernetes is a future deployment
 adapter, not a reason to embed Kubernetes concepts in the service layer.
+
+### 4.7 Evaluation layer
+
+The standalone `llm_platform.evaluation` package owns:
+
+- strict versioned JSONL dataset parsing and content hashing;
+- bounded asynchronous calls to the public buffered chat endpoint;
+- deterministic answer evaluation and bounded response previews;
+- reproducible JSON and Markdown report generation;
+- baseline comparison and process exit codes for regression gates.
+
+It depends on the public HTTP contract rather than application/domain
+internals. The FastAPI application, completion service, domain, backend, and
+observability packages have no dependency on evaluation code. This keeps
+quality experiments and CI gating replaceable without creating a second
+in-process serving path.
 
 ## 5. Request lifecycle
 
@@ -388,6 +409,9 @@ metrics, but never high-cardinality or sensitive values.
   request, Prometheus target health, and Grafana provisioning.
 - **Load tests:** fixed scenarios with machine/model/config metadata and
   correctness assertions in addition to latency/throughput.
+- **Evaluation tests:** strict dataset fixtures, deterministic lexical
+  evaluators, mock HTTP transports, bounded worker synchronization, report
+  fields, and regression gates.
 
 Tests must not require downloading a large model in the default suite.
 
@@ -439,6 +463,8 @@ Initial architectural decision records should capture:
 4. SSE for OpenAI-compatible streaming.
 5. Lifecycle-event-driven Prometheus instrumentation with bounded labels.
 6. A fake backend as the default integration-test dependency.
+7. A standalone public-HTTP evaluation client rather than evaluation logic in
+   the serving runtime.
 
 These choices optimize clarity and replaceability. They explicitly trade away
 multi-worker global admission and distributed scheduling until a later phase.

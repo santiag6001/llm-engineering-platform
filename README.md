@@ -10,11 +10,12 @@ repeatable performance measurement. It is deliberately small enough to study
 and modify. It is not intended to compete with inference engines such as vLLM
 or SGLang.
 
-Phase 3 is implemented: the repository contains a locally runnable FastAPI
+Phase 4 is implemented: the repository contains a locally runnable FastAPI
 service with health checks, model discovery, and buffered or SSE-streaming chat
 completions forwarded to a separately running llama.cpp server, plus
-Prometheus-compatible production metrics. Later capabilities remain on the
-phased development plan.
+Prometheus-compatible production metrics and a separate deterministic
+evaluation/regression CLI. Later capabilities remain on the phased development
+plan.
 
 ## Goals
 
@@ -99,6 +100,7 @@ The layout below is a design target, not yet implemented:
 │   ├── backends/        # llama.cpp adapter and backend transport
 │   ├── scheduling/      # queue and concurrency implementations
 │   ├── observability/   # metrics, logging, and request context
+│   ├── evaluation/      # standalone datasets, runner, reports, and gates
 │   └── config/          # typed settings and composition root
 ├── tests/
 │   ├── unit/
@@ -106,6 +108,7 @@ The layout below is a design target, not yet implemented:
 │   ├── contract/
 │   └── load/
 ├── benchmarks/          # scenarios, runner configuration, and result schema
+├── evaluations/         # versioned datasets, reviewed baselines, local reports
 ├── deploy/
 │   ├── docker/
 │   ├── prometheus/
@@ -128,10 +131,11 @@ without invalidating earlier behavior:
 2. Non-streaming chat completion
 3. End-to-end streaming
 4. Production observability
-5. Bounded queue and concurrency control
-6. Production error handling and lifecycle management
-7. Prometheus, Grafana, and Docker Compose
-8. Reproducible benchmarks and documentation hardening
+5. LLM evaluation and regression
+6. Bounded queue and concurrency control
+7. Production error handling and lifecycle management
+8. Prometheus, Grafana, and Docker Compose
+9. Reproducible benchmarks and documentation hardening
 
 The detailed entry criteria, deliverables, tests, and exit criteria are in the
 [Development plan](docs/development-plan.md).
@@ -162,6 +166,8 @@ The detailed entry criteria, deliverables, tests, and exit criteria are in the
   phases
 - [Metrics](docs/metrics.md): metric names, labels, lifecycle semantics, and
   cardinality policy
+- [Evaluation](docs/evaluation.md): dataset, evaluator, report, and regression
+  contracts
 - [Contributor/agent guidance](AGENTS.md): rules for future implementation work
 
 ## Local run
@@ -474,5 +480,152 @@ bodies, and model file paths are never metric labels.
 
 ## Current status
 
-Phase 3 production observability implemented for buffered and SSE-streaming
-chat completions.
+Phase 4 evaluation and regression is implemented alongside the unchanged
+Phase 1–3 serving runtime.
+
+## Phase 4 Evaluation and Regression
+
+### Evaluation architecture
+
+The `llm-eval` tool is a separate client of the running platform:
+
+```text
+versioned JSONL -> bounded async evaluation workers
+                -> POST /v1/chat/completions (buffered)
+                -> deterministic evaluators
+                -> JSON + Markdown reports
+                -> optional baseline regression gates
+```
+
+Nothing in the FastAPI application imports `llm_platform.evaluation`. The
+evaluation runner uses a fixed number of workers, preserves dataset ordering,
+does not retry generation, and continues after an individual request or
+evaluator error.
+
+### JSONL dataset format
+
+Each non-empty line is one strict schema-version `1.0` case:
+
+```json
+{
+  "schema_version": "1.0",
+  "id": "kv-cache-purpose",
+  "category": "serving_concepts",
+  "messages": [{"role": "user", "content": "What does a KV cache store?"}],
+  "expected": {
+    "contains_all": ["key", "value"],
+    "case_sensitive": false,
+    "normalize_whitespace": true
+  },
+  "generation": {"temperature": 0.0, "max_tokens": 80},
+  "metadata": {
+    "description": "Checks the core KV-cache concept.",
+    "tags": ["kv-cache"]
+  }
+}
+```
+
+IDs must be unique. Roles are limited to `system`, `user`, and `assistant`.
+Unknown fields, empty message/evaluator lists, malformed JSON, invalid
+generation limits, and invalid evaluator bounds are rejected. See
+[Evaluation](docs/evaluation.md) for the complete schema.
+
+### Deterministic evaluators
+
+Every successful response receives a non-empty check. Cases can additionally
+configure exact match, contains-all, contains-any, forbidden-string detection,
+and response character-length bounds. Comparisons default to Unicode
+case-insensitive matching with whitespace runs collapsed; either behavior can
+be changed explicitly per case. There is no fuzzy matching or LLM-as-a-Judge.
+
+### Run an evaluation
+
+Install the project, start the platform separately, then run:
+
+```bash
+llm-eval run \
+  --dataset evaluations/datasets/serving-concepts.jsonl \
+  --base-url http://127.0.0.1:8000 \
+  --model local-model \
+  --timeout 120 \
+  --max-concurrency 1 \
+  --output-dir evaluations/reports
+```
+
+`LLM_PLATFORM_BASE_URL`, `LLM_PLATFORM_MODEL`,
+`LLM_EVAL_TIMEOUT_SECONDS`, and `LLM_EVAL_MAX_CONCURRENCY` can supply defaults.
+A run writes `evaluation-<run-id>.json` and `evaluation-<run-id>.md`. Exit `0`
+means the run completed without request/evaluator errors; exit `3` means the
+reports were written but one or more cases had an operational error. A
+deterministic answer mismatch alone does not change the run exit code.
+
+### Save and compare a baseline
+
+Review a representative JSON report before promoting it:
+
+```bash
+cp evaluations/reports/evaluation-<reviewed-run-id>.json \
+  evaluations/baselines/serving-concepts.json
+```
+
+Compare a current report with explicit gates:
+
+```bash
+llm-eval compare \
+  --current evaluations/reports/evaluation-<current-run-id>.json \
+  --baseline evaluations/baselines/serving-concepts.json \
+  --min-pass-rate 0.80 \
+  --max-pass-rate-drop 0.05 \
+  --max-error-rate 0.05 \
+  --max-p95-latency-seconds 5.0 \
+  --max-p95-latency-increase-percent 20
+```
+
+Comparison exits `0` when every enabled gate passes and `1` when any gate
+fails. Missing metrics fail gates that require them. Invalid input is exit `2`.
+
+### Report examples
+
+The JSON report contains schema/run identity, dataset SHA-256, platform
+configuration, aggregate quality/latency/token metrics, bounded per-case
+previews and evaluator results, safe errors, and Git metadata when available.
+The Markdown companion summarizes the same run:
+
+```text
+Total cases: 5
+Passed: 4
+Errors: 0
+Pass rate: 80.00%
+P95 (nearest rank): 1.420000 seconds
+```
+
+Buffered evaluation records end-to-end latency but does not claim TTFT.
+
+### CI usage
+
+The evaluation framework itself is fully testable offline:
+
+```bash
+pytest \
+  tests/test_evaluation_dataset.py \
+  tests/test_evaluators.py \
+  tests/test_evaluation_runner.py \
+  tests/test_evaluation_reporting.py \
+  tests/test_evaluation_regression.py \
+  tests/test_evaluation_cli.py
+```
+
+A model-backed CI environment can run `llm-eval run`, retain both artifacts,
+then invoke `llm-eval compare`; the compare exit code is the regression gate.
+Default CI must use mock transports and must not download a model.
+
+### Limitations
+
+- Evaluation is buffered only, so TTFT and stream correctness are not measured.
+- Evaluators are lexical and deterministic; they do not judge semantic
+  equivalence.
+- No external hosted LLM or LLM-as-a-Judge is used.
+- There are no retries, warm-up scenarios, saturation workloads, or hardware
+  telemetry in this phase.
+- The example dataset demonstrates the schema; small local models are not
+  expected to pass every case.

@@ -16,6 +16,9 @@ dependencies = [
     "uvicorn[standard]>=0.34,<1",
 ]
 
+[project.scripts]
+llm-eval = "llm_platform.evaluation.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "mypy>=1.14,<2",
