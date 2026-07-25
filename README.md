@@ -10,9 +10,10 @@ repeatable performance measurement. It is deliberately small enough to study
 and modify. It is not intended to compete with inference engines such as vLLM
 or SGLang.
 
-This repository is currently in the design phase. It contains documentation and
-planning only; application code is intentionally deferred to the phased
-development plan.
+Phase 1 is implemented: the repository contains a locally runnable FastAPI
+service with health checks, model discovery, and non-streaming chat completions
+forwarded to a separately running llama.cpp server. Later capabilities remain
+on the phased development plan.
 
 ## Goals
 
@@ -48,6 +49,16 @@ The first compatibility target is:
 - `POST /v1/chat/completions`, with both buffered and Server-Sent Events (SSE)
   responses
 - `GET /metrics`
+
+The currently implemented Phase 1 subset is:
+
+- `GET /health` and `GET /health/live` for process-local liveness;
+- `GET /ready` and `GET /health/ready` for a live llama-server probe;
+- `GET /v1/models` for the configured public model;
+- `POST /v1/chat/completions` for non-streaming requests only.
+
+`stream=true` is rejected with HTTP 400. Metrics and the other planned
+capabilities are not implemented yet.
 
 OpenAI compatibility is a versioned, tested contract rather than a claim that
 all OpenAI behavior is supported. Unsupported fields and endpoints will be
@@ -155,7 +166,97 @@ The detailed entry criteria, deliverables, tests, and exit criteria are in the
 - [Metrics](docs/metrics.md): metric contract, labels, dashboards, and alerts
 - [Contributor/agent guidance](AGENTS.md): rules for future implementation work
 
+## Phase 1 local run
+
+Python 3.12 or newer is required. On Ubuntu 24.04/WSL2, create an isolated
+environment and install the application plus development checks:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e '.[dev]'
+```
+
+Runtime dependencies are deliberately small: FastAPI provides the ASGI/API
+layer, Pydantic validates public and upstream boundaries, httpx provides the
+shared asynchronous backend client, and Uvicorn runs the ASGI process. The
+optional `dev` group adds only pytest/pytest-asyncio for tests, Ruff for
+formatting/linting, and mypy for static type checking. Version ranges constrain
+each dependency to its current major release.
+
+Start a compatible `llama-server` separately. The exact binary path, model,
+context, and CPU thread count are local choices; a typical invocation is:
+
+```bash
+./llama-server \
+  --model ./models/your-model.gguf \
+  --host 127.0.0.1 \
+  --port 8080
+```
+
+The model file must be supplied locally and must not be committed. Verify that
+the selected llama.cpp build exposes `/health` and the OpenAI-compatible
+`/v1/chat/completions` endpoint.
+
+Then start the API:
+
+```bash
+LLAMA_SERVER_BASE_URL=http://127.0.0.1:8080 \
+LLAMA_SERVER_TIMEOUT_SECONDS=120 \
+LLM_PLATFORM_MODEL=local-model \
+uvicorn llm_platform.main:app --host 127.0.0.1 --port 8000
+```
+
+`LLAMA_SERVER_BASE_URL` defaults to `http://127.0.0.1:8080`,
+`LLAMA_SERVER_TIMEOUT_SECONDS` defaults to 120 seconds, and
+`LLM_PLATFORM_MODEL` defaults to `local-model`. Settings are validated at
+startup. The timeout covers the complete buffered backend request. Generation
+requests are never retried automatically.
+
+Check the service and send a completion:
+
+```bash
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/ready
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{
+    "model": "local-model",
+    "messages": [{"role": "user", "content": "Say hello briefly."}],
+    "stream": false
+  }'
+```
+
+Run all Phase 1 checks:
+
+```bash
+ruff format --check .
+ruff check .
+mypy
+pytest
+```
+
+### Supported chat completion fields
+
+| Field | Phase 1 behavior |
+|---|---|
+| `model` | Required and forwarded |
+| `messages` | Required; `system`, `user`, and `assistant` text messages |
+| `temperature` | Optional and forwarded |
+| `max_tokens` | Optional and forwarded |
+| `stream` | Optional; `false` is forwarded, `true` is rejected |
+| Any other field | Rejected rather than silently ignored |
+
+Successful responses are validated as OpenAI-shaped JSON and retain
+llama.cpp extension fields. Safe, structured upstream 4xx details are retained;
+upstream 5xx, invalid JSON/shape, timeouts, and connection failures are mapped
+to stable gateway errors without exposing Python exception details or raw
+backend bodies.
+
+Phase 1 intentionally has no streaming, queue, concurrency limit,
+authentication, rate limiting, Prometheus/Grafana, Docker, or Kubernetes.
+
 ## Current status
 
-Design complete; implementation has not started.
-
+Phase 1 non-streaming API implemented. Phase 2 streaming has not started.
