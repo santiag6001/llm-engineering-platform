@@ -237,6 +237,61 @@ mypy
 pytest
 ```
 
+### Phase 1 real-backend smoke test
+
+Phase 1 was verified end to end on WSL2 Ubuntu with an AMD Ryzen 7 5800H in
+CPU-only mode. The backend was the llama.cpp `llama-server` binary at
+`/home/chen1/projects/llm-inference-optimization-lab/third_party/llama.cpp/build-release/bin/llama-server`,
+serving the Q4_K_M quantization of Qwen2.5-0.5B-Instruct from
+`/home/chen1/projects/llm-inference-optimization-lab/models/qwen2.5-0.5b-instruct-q4_k_m.gguf`.
+
+The verified request path was:
+
+```text
+curl client -> FastAPI -> llama.cpp llama-server
+            -> Qwen2.5-0.5B-Instruct GGUF
+            -> OpenAI-compatible JSON response
+```
+
+With `llama-server` at `http://127.0.0.1:8080` and the platform at
+`http://127.0.0.1:8000`, `GET /health`, `GET /ready`, `GET /v1/models`, and
+`POST /v1/chat/completions` all returned HTTP 200. The chat response retained
+the backend's `id`, `object`, `model`, `choices`, `usage`,
+`system_fingerprint`, and `timings` fields.
+
+Reproduce the smoke test from the repository root in separate terminals:
+
+```bash
+/home/chen1/projects/llm-inference-optimization-lab/third_party/llama.cpp/build-release/bin/llama-server \
+  --model /home/chen1/projects/llm-inference-optimization-lab/models/qwen2.5-0.5b-instruct-q4_k_m.gguf \
+  --host 127.0.0.1 \
+  --port 8080
+```
+
+```bash
+LLAMA_SERVER_BASE_URL=http://127.0.0.1:8080 \
+LLAMA_SERVER_TIMEOUT_SECONDS=120 \
+LLM_PLATFORM_MODEL=local-model \
+uvicorn llm_platform.main:app --host 127.0.0.1 --port 8000
+```
+
+```bash
+curl --fail http://127.0.0.1:8000/health
+curl --fail http://127.0.0.1:8000/ready
+curl --fail http://127.0.0.1:8000/v1/models
+curl --fail http://127.0.0.1:8000/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{
+    "model": "local-model",
+    "messages": [{"role": "user", "content": "Say hello briefly."}],
+    "stream": false
+  }'
+```
+
+This smoke test checks platform integration and response handling; the answer
+quality of this small model is not a platform correctness signal. Phase 1
+supports non-streaming requests only, and rejects `stream=true`.
+
 ### Supported chat completion fields
 
 | Field | Phase 1 behavior |
