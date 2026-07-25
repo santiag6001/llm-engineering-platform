@@ -10,12 +10,15 @@ repeatable performance measurement. It is deliberately small enough to study
 and modify. It is not intended to compete with inference engines such as vLLM
 or SGLang.
 
-Phase 5 is implemented: the repository contains a locally runnable FastAPI
+Phase 6 is implemented: the repository contains a locally runnable FastAPI
 service with health checks, model discovery, and buffered or SSE-streaming chat
 completions forwarded to a separately running llama.cpp server, plus
 Prometheus-compatible production metrics and a separate deterministic
 evaluation/regression CLI. It also provides a reproducible non-root gateway
 image, Docker Compose deployment, Prometheus scraping, and deterministic CI.
+It also provides a fully local reproducible experiment registry that binds
+evaluation artifacts to code, data, configuration, environment, and regression
+decisions.
 Later capabilities remain on the phased development plan.
 
 ## Goals
@@ -102,6 +105,7 @@ The layout below is a design target, not yet implemented:
 │   ├── scheduling/      # queue and concurrency implementations
 │   ├── observability/   # metrics, logging, and request context
 │   ├── evaluation/      # standalone datasets, runner, reports, and gates
+│   ├── experiments/     # local identities, manifests, registry, and CLI
 │   └── config/          # typed settings and composition root
 ├── tests/
 │   ├── unit/
@@ -128,12 +132,13 @@ Implementation is divided into small vertical phases. Every phase ends with a
 runnable system and automated acceptance checks; later phases add capability
 without invalidating earlier behavior:
 
-1. Walking skeleton and health endpoints
-2. Non-streaming chat completion
-3. End-to-end streaming
-4. Production observability
-5. LLM evaluation and regression
-6. Reproducible containerized deployment and CI/CD
+0. Walking skeleton and health endpoints
+1. Non-streaming chat completion
+2. End-to-end streaming
+3. Production observability
+4. LLM evaluation and regression
+5. Reproducible containerized deployment and CI/CD
+6. Reproducible LLM engineering
 7. Bounded queue and concurrency control
 8. Production error handling and lifecycle management
 9. Grafana and operational deployment extensions
@@ -173,6 +178,8 @@ The detailed entry criteria, deliverables, tests, and exit criteria are in the
   contracts
 - [Deployment](docs/deployment.md): image, Compose, health, Prometheus, and CI
   behavior
+- [Reproducibility](docs/reproducibility.md): experiment identity, manifests,
+  registry, integrity, privacy, and comparison semantics
 - [Contributor/agent guidance](AGENTS.md): rules for future implementation work
 
 ## Local run
@@ -485,8 +492,8 @@ bodies, and model file paths are never metric labels.
 
 ## Current status
 
-Phase 5 containerized deployment and CI/CD is implemented alongside the
-unchanged Phase 1–4 runtime and evaluation behavior.
+Phase 6 reproducible LLM engineering is implemented alongside the unchanged
+Phase 1–5 runtime, evaluation, metrics, and deployment behavior.
 
 ## Phase 4 Evaluation and Regression
 
@@ -777,3 +784,138 @@ hosted API, running llama-server, secret, registry push, or cloud credential.
 - The deployment is unauthenticated, CPU-oriented, single-process, and has no
   request queue, concurrency limiter, Grafana, Kubernetes, distributed
   coordination, automatic model download, or image publishing pipeline.
+
+## Phase 6 Reproducible LLM Engineering
+
+### Architecture and identity
+
+`llm-experiment` is a standalone local client layered on the existing
+evaluation package:
+
+```text
+experiment configuration + versioned dataset
+  -> canonical input fingerprint + source/environment capture
+  -> existing EvaluationRunner and report rendering
+  -> existing regression gates against an explicit baseline
+  -> strict manifest + checksummed artifacts
+  -> atomic local registry
+```
+
+The FastAPI application does not import `llm_platform.experiments`. A `run_id`
+uniquely identifies one execution and includes a timestamp, short fingerprint,
+and nonce. The 64-character `experiment_fingerprint` deterministically
+identifies equivalent inputs and excludes timestamps, output metrics, run IDs,
+and machine-specific paths. It includes dataset content, requested model,
+generation defaults, evaluator/evaluation configuration, resolved baseline and
+gates, optional prompt identity, and Git commit. The exact rules are documented
+in [Reproducibility](docs/reproducibility.md).
+
+### Manifest and registry
+
+Every immutable `experiments/runs/<run-id>/manifest.json` records source commit,
+dirty state and branch; dataset identifier/path/hash/case count; optional prompt
+identity; requested and backend-observed model; generation, evaluation, and
+regression configuration; regression decision; bounded environment and optional
+deployment metadata; aggregate quality, latency, and token results; artifacts;
+and a structured reproduction specification. Failed runs use a bounded safe
+failure message.
+
+Runs are assembled in a same-filesystem staging directory and finalized by
+atomic rename. Existing run IDs are never overwritten. Artifact paths are
+portable and relative, and `checksums.json` mirrors every stored artifact's
+SHA-256 and byte size. Generated runs, aliases, and comparisons are ignored by
+Git; curated examples and placeholders remain tracked.
+
+### Run, inspect, and verify experiments
+
+Start the gateway/backend separately, then run:
+
+```bash
+llm-experiment run \
+  --dataset evaluations/datasets/serving-concepts.jsonl \
+  --base-url http://127.0.0.1:8000 \
+  --model local-model \
+  --registry-dir experiments \
+  --max-concurrency 2 \
+  --timeout-seconds 120
+```
+
+List, inspect, and verify immutable artifacts:
+
+```bash
+llm-experiment list --registry-dir experiments
+llm-experiment show <run-id-or-alias> --registry-dir experiments
+llm-experiment verify <run-id-or-alias> --registry-dir experiments
+```
+
+Verification strictly parses the manifest and checksum index, rejects path and
+symlink escapes, checks existence and byte size, and recalculates SHA-256.
+
+### Baseline aliases and regression policy
+
+Aliases are atomically updated mutable pointers without history. They can
+reference only an existing immutable run:
+
+```bash
+llm-experiment alias set baseline <reviewed-run-id> \
+  --registry-dir experiments
+llm-experiment alias show baseline --registry-dir experiments
+```
+
+An experiment can explicitly use the reviewed baseline and existing Phase 4
+gates:
+
+```bash
+llm-experiment run \
+  --dataset evaluations/datasets/serving-concepts.jsonl \
+  --base-url http://127.0.0.1:8000 \
+  --model local-model \
+  --registry-dir experiments \
+  --baseline baseline \
+  --min-pass-rate 0.80 \
+  --max-error-rate 0.05
+```
+
+The manifest records both `baseline` and its resolved immutable run ID.
+Experiments never create or update aliases automatically.
+
+### Compare runs
+
+Registered runs can be compared by ID or alias:
+
+```bash
+llm-experiment compare baseline candidate \
+  --registry-dir experiments \
+  --output-dir experiments/comparisons
+```
+
+JSON and Markdown classify input/configuration, source, environment, quality,
+performance, and artifact changes. This is an audit view, not another gate;
+only configured regression policy determines pass/fail.
+
+### Reproduction, privacy, and limitations
+
+`manifest.json` contains a bounded reproduction specification, and `summary.md`
+renders a command using `${LLM_PLATFORM_BASE_URL}` instead of embedding a
+service address or credential. It records the portable dataset path, requested
+model, generation defaults, evaluation concurrency/timeout, resolved baseline,
+gate values, source commit, and project version.
+
+Environment capture is limited to Python version/implementation, OS/release,
+architecture, project version, container detection, and allowlisted `httpx`
+and `pydantic` versions. It never captures all packages or environment
+variables, hostname, username, home directory, IP address, or secrets.
+Manifests contain neither complete prompts nor generated responses. The
+optional shared prompt stores only logical name, version, exact-byte hash, and
+portable source path.
+
+This provides configuration reproducibility, environment traceability,
+deterministic report structure, and local artifact integrity. It does not
+promise bit-for-bit generated text: model sampling, backend builds, CPU kernels,
+and scheduling can still affect output. The registry has no signing, alias
+history, database, remote replication, hosted UI, or schema migration utility.
+
+Stable experiment CLI exits are `0` for success, `1` for regression failure,
+`2` for invalid input, `3` for an operational evaluation failure with a
+preserved manifest, `4` for registry/artifact integrity failure, and `5` for a
+missing run or alias. Expected failures do not print tracebacks.

@@ -17,6 +17,7 @@ dist
 tests
 docs
 evaluations
+experiments
 models
 *.gguf
 *.env

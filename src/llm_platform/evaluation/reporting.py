@@ -125,21 +125,26 @@ def write_report_files(
     stem = f"evaluation-{report.run_id}"
     json_path = output_directory / f"{stem}.json"
     markdown_path = output_directory / f"{stem}.md"
-    json_path.write_text(
+    json_path.write_text(render_json(report), encoding="utf-8")
+    markdown_path.write_text(
+        render_markdown(report, regression_markdown=regression_markdown),
+        encoding="utf-8",
+    )
+    return json_path, markdown_path
+
+
+def render_json(report: EvaluationReport) -> str:
+    """Render the canonical human-readable JSON report representation."""
+
+    return (
         json.dumps(
             report.model_dump(mode="json"),
             indent=2,
             sort_keys=True,
             ensure_ascii=False,
         )
-        + "\n",
-        encoding="utf-8",
+        + "\n"
     )
-    markdown_path.write_text(
-        render_markdown(report, regression_markdown=regression_markdown),
-        encoding="utf-8",
-    )
-    return json_path, markdown_path
 
 
 def render_markdown(

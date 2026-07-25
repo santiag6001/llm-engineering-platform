@@ -13,3 +13,12 @@ models/
 *.gguf
 evaluations/reports/*
 !evaluations/reports/.gitkeep
+experiments/runs/*
+!experiments/runs/.gitkeep
+experiments/aliases/*
+!experiments/aliases/.gitkeep
+experiments/comparisons/*
+!experiments/comparisons/.gitkeep
+experiments/runs/.staging-*
+experiments/aliases/.alias-*
+experiments/comparisons/.comparison-*

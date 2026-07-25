@@ -226,7 +226,64 @@ an explicit optional integration.
 The roadmap insertion and its effect on later numbering are recorded in
 [ADR 0002](adr/0002-phase-5-deployment-before-scheduling.md).
 
-## 8. Phase 6 — Bounded queue and concurrency control
+## 8. Phase 6 — Reproducible LLM engineering
+
+**Status: complete.**
+
+**Working system:** a standalone local experiment CLI binds evaluation runs to
+canonical inputs, source/environment provenance, regression policy, and
+checksummed immutable artifacts without changing the serving runtime.
+
+### Deliverables
+
+- Canonical JSON and SHA-256 experiment identity distinct from unique execution
+  run IDs.
+- Strict manifest schema `1.0` covering source, dataset, prompt, model,
+  generation, evaluation, regression, environment, artifacts, aggregates,
+  failure, and reproduction configuration.
+- Bounded Git and environment capture with an explicit dependency allowlist and
+  deterministic environment fingerprint.
+- Filesystem registry using same-filesystem staging and atomic rename, portable
+  artifact paths, duplicate protection, and concurrent registration safety.
+- Atomic mutable aliases to immutable runs, with resolved baseline identity
+  recorded and no automatic promotion.
+- Reuse of Phase 4 evaluation runners, JSON/Markdown rendering, and regression
+  gates.
+- SHA-256/byte-size artifact verification with traversal and symlink defenses.
+- Audit comparison in JSON and Markdown across input, source, environment,
+  quality, performance, and artifact categories.
+- `llm-experiment run`, `list`, `show`, `compare`, `alias`, and `verify` with
+  stable exit codes `0` through `5`.
+- Detailed reproducibility/privacy documentation and a deterministic offline
+  registry smoke test in CI.
+
+### Tests
+
+- Fingerprint canonicalization, relevant/excluded inputs, prompt identity, and
+  unique run-ID semantics.
+- Strict manifest version/field/path/failure validation and environment
+  allowlisting.
+- Atomic/duplicate/concurrent registration, deterministic listing/filtering,
+  aliases, incomplete staging, and path traversal rejection.
+- Artifact checksum, size, missing-file, and symlink verification failures.
+- Successful, regression-passing, regression-failing, case-error, and
+  unexpected operational runner outcomes with immutable artifacts.
+- Source, dataset, generation, environment, quality, performance, and artifact
+  comparison output.
+- Complete CLI help/operation/exit behavior and traceback-free expected errors.
+- Complete Phase 1–5 regression suite.
+
+### Exit criteria
+
+The complete offline suite and registry smoke test pass without a model,
+backend, Docker daemon, external service, database, or secret. A run can be
+reconstructed at the configuration level, its environment and source can be
+audited, and every registered artifact can be verified.
+
+The local-registry decision and the effect on later numbering are recorded in
+[ADR 0003](adr/0003-local-reproducible-experiment-registry.md).
+
+## 9. Phase 7 — Bounded queue and concurrency control
 
 **Working system:** requests above the active limit wait in a bounded FIFO
 queue; overload is rejected predictably; cancellation frees capacity.
@@ -258,7 +315,7 @@ A load scenario demonstrates a bounded active count, a bounded queue, and
 predictable rejection. After the scenario, active and queued counts return to
 zero.
 
-## 9. Phase 7 — Resilience and process lifecycle
+## 10. Phase 8 — Resilience and process lifecycle
 
 **Working system:** the service behaves predictably during backend failure,
 startup, and shutdown while preserving established API and scheduling behavior.
@@ -289,7 +346,7 @@ startup, and shutdown while preserving established API and scheduling behavior.
 Automated integration tests can kill or stall the fake backend and initiate
 shutdown without hanging the API or leaking tasks.
 
-## 10. Phase 8 — Grafana and operational deployment extensions
+## 11. Phase 9 — Grafana and operational deployment extensions
 
 **Working system:** the established Compose deployment gains a provisioned
 Grafana dashboard and operational real-model acceptance checks after runtime
@@ -317,7 +374,7 @@ A fresh Ubuntu 24.04/WSL2 environment with Docker and a supplied compatible GGUF
 model can follow the README to reach a ready deployment with a provisioned
 dashboard and validated shutdown behavior.
 
-## 11. Phase 9 — Reproducible benchmarks
+## 12. Phase 10 — Reproducible benchmarks
 
 **Working system:** a benchmark runner sends defined workloads, validates
 responses, and writes results with enough metadata to repeat and compare runs.
@@ -351,7 +408,7 @@ Two runs with the same inputs are structurally comparable, and the report makes
 hardware/model/config differences obvious. No baseline performance claim is
 published without its metadata.
 
-## 12. Phase 10 — Release hardening
+## 13. Phase 11 — Release hardening
 
 **Working system:** the complete educational platform can be cloned, validated,
 operated, and studied from its documentation.
@@ -382,9 +439,9 @@ operated, and studied from its documentation.
 All documented acceptance checks pass, known limitations are explicit, and a
 new contributor can reproduce both the deployment and a benchmark.
 
-## 13. Deferred roadmap
+## 14. Deferred roadmap
 
-The following begin only after Phase 10, each as another independently working
+The following begin only after Phase 11, each as another independently working
 vertical increment:
 
 1. API-key authentication and principal context.

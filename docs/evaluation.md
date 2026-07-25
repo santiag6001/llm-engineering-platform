@@ -226,3 +226,15 @@ fails an evaluation.
 - Reports are schema-versioned but no cross-version migration tool exists yet.
 - Example cases teach serving concepts and are not a quality promise for the
   small local Qwen model.
+
+## 12. Phase 6 experiment integration
+
+The Phase 6 experiment runner imports and reuses `EvaluationRunner`,
+`build_report`, JSON/Markdown rendering, `EvaluationReport`, and the regression
+gate functions. Dataset parsing, worker ordering, request payloads, evaluator
+semantics, report schema `1.0`, and `llm-eval` exit codes are unchanged.
+
+Experiment manifests wrap rather than replace evaluation reports. The
+experiment fingerprint uses the exact dataset content hash, and generated
+`evaluation.json` remains valid input to `llm-eval compare`. The FastAPI
+application imports neither package.

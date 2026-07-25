@@ -67,7 +67,7 @@ boundaries that need contract tests, failure injection, or future replacement.
 
 ## 3. Runtime topology
 
-The Phase 5 base Docker Compose deployment contains:
+The Phase 5 base Docker Compose deployment, unchanged by Phase 6, contains:
 
 1. **Gateway:** one Uvicorn/FastAPI process, the backend adapter, and
    `/metrics`.
@@ -88,6 +88,23 @@ Evaluation is not part of this runtime topology. The Phase 4 evaluation tool is
 a separate command-line client that sends buffered requests through the public
 OpenAI-compatible endpoint. The serving application does not import the
 evaluation package, and evaluation failures cannot alter API process state.
+
+Experiment tracking is also outside the runtime topology. The Phase 6
+`llm_platform.experiments` package orchestrates the evaluation package, records
+bounded source/environment metadata, and writes an atomic local registry. It is
+an offline-capable CLI concern. Neither the serving application nor evaluation
+logic imports it.
+
+```mermaid
+flowchart LR
+    Config[Experiment configuration] --> Experiment[Experiment runner]
+    Dataset[Versioned JSONL] --> Experiment
+    Experiment --> Eval[Existing evaluation runner]
+    Eval --> API[Public buffered chat API]
+    Eval --> Reports[Existing reports and gates]
+    Reports --> Experiment
+    Experiment --> Registry[Local atomic registry]
+```
 
 ## 4. Component responsibilities
 
@@ -225,6 +242,31 @@ internals. The FastAPI application, completion service, domain, backend, and
 observability packages have no dependency on evaluation code. This keeps
 quality experiments and CI gating replaceable without creating a second
 in-process serving path.
+
+### 4.8 Experiment layer
+
+The standalone `llm_platform.experiments` package owns:
+
+- canonical input and environment SHA-256 identities;
+- strict versioned experiment manifests;
+- bounded Git and runtime metadata collection;
+- orchestration of the existing evaluation/report/regression interfaces;
+- immutable run directories finalized by atomic rename;
+- checksum and byte-size verification with traversal/symlink defenses;
+- mutable atomic aliases to existing immutable runs; and
+- audit comparison of registered manifests and artifacts.
+
+It does not own dataset parsing, evaluator behavior, public HTTP calls,
+regression policy, FastAPI behavior, serving configuration, Prometheus
+collectors, or deployment. The evaluation package remains independently usable
+through `llm-eval`. The FastAPI composition root has no experiment dependency.
+
+Run and environment fingerprints are content identities, not signatures.
+Aliases are mutable pointers without history, while every experiment using one
+records its resolved immutable baseline run ID. The complete schema, privacy,
+and atomicity contract is in [Reproducibility](reproducibility.md) and the local
+registry decision is in
+[ADR 0003](adr/0003-local-reproducible-experiment-registry.md).
 
 ## 5. Request lifecycle
 
@@ -414,6 +456,10 @@ metrics, but never high-cardinality or sensitive values.
 - **Evaluation tests:** strict dataset fixtures, deterministic lexical
   evaluators, mock HTTP transports, bounded worker synchronization, report
   fields, and regression gates.
+- **Experiment tests:** canonical identity, strict manifests, environment
+  allowlists, concurrent atomic registration, alias resolution, artifact
+  integrity, orchestration reuse, registered-run comparison, CLI exits, and an
+  offline registry smoke test.
 
 Tests must not require downloading a large model in the default suite.
 
@@ -467,6 +513,8 @@ Initial architectural decision records should capture:
 6. A fake backend as the default integration-test dependency.
 7. A standalone public-HTTP evaluation client rather than evaluation logic in
    the serving runtime.
+8. A local filesystem experiment registry before an external tracking platform
+   or database.
 
 These choices optimize clarity and replaceability. They explicitly trade away
 multi-worker global admission and distributed scheduling until a later phase.

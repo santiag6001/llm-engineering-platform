@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 llm-eval = "llm_platform.evaluation.cli:main"
+llm-experiment = "llm_platform.experiments.cli:main"
 
 [project.optional-dependencies]
 dev = [

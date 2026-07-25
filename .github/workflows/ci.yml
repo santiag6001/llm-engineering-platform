@@ -57,6 +57,17 @@ jobs:
           llm-eval run --help
           llm-eval compare --help
 
+      - name: Validate experiment CLI and offline registry
+        run: |
+          llm-experiment --help
+          llm-experiment run --help
+          llm-experiment list --help
+          llm-experiment show --help
+          llm-experiment compare --help
+          llm-experiment alias --help
+          llm-experiment verify --help
+          python scripts/experiment_registry_smoke.py
+
       - name: Validate whitespace
         run: git diff --check
 
