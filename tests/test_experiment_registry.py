@@ -16,6 +16,49 @@ from llm_platform.experiments.registry import (
 from tests.experiment_helpers import FIXED_TIME, manifest, register_manifest
 
 
+def test_empty_runs_directory_lists_no_runs(tmp_path: Path) -> None:
+    registry = ExperimentRegistry(tmp_path / "experiments")
+
+    assert registry.list_runs() == []
+
+
+def test_gitkeep_placeholder_lists_no_runs(tmp_path: Path) -> None:
+    registry = ExperimentRegistry(tmp_path / "experiments")
+    registry.initialize()
+    (registry.runs_directory / ".gitkeep").touch()
+
+    assert registry.list_runs() == []
+
+
+def test_gitkeep_placeholder_does_not_affect_newest_run(tmp_path: Path) -> None:
+    registry = ExperimentRegistry(tmp_path / "experiments")
+    registered = register_manifest(registry)
+    (registry.runs_directory / ".gitkeep").touch()
+
+    assert registry.newest() == registered
+
+
+@pytest.mark.parametrize("filename", ["unexpected.txt", ".unexpected"])
+def test_unexpected_files_in_runs_directory_are_rejected(
+    tmp_path: Path, filename: str
+) -> None:
+    registry = ExperimentRegistry(tmp_path / "experiments")
+    registry.initialize()
+    (registry.runs_directory / filename).touch()
+
+    with pytest.raises(RegistryIntegrityError):
+        registry.list_runs()
+
+
+def test_malformed_run_directory_is_rejected(tmp_path: Path) -> None:
+    registry = ExperimentRegistry(tmp_path / "experiments")
+    registry.initialize()
+    (registry.runs_directory / "malformed-run").mkdir()
+
+    with pytest.raises(RegistryIntegrityError):
+        registry.list_runs()
+
+
 def test_atomic_registration_listing_filters_and_newest(tmp_path: Path) -> None:
     registry = ExperimentRegistry(tmp_path / "experiments")
     older = register_manifest(registry, "older")

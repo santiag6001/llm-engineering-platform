@@ -23,6 +23,7 @@ from llm_platform.experiments.models import (
 
 _RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _ALIAS = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+_RUNS_PLACEHOLDER_FILES = frozenset({".gitkeep"})
 
 
 class RegistryError(RuntimeError):
@@ -204,6 +205,10 @@ class ExperimentRegistry:
         manifests: list[ExperimentManifest] = []
         for candidate in self.runs_directory.iterdir():
             if candidate.name.startswith(".staging-"):
+                continue
+            if candidate.name in _RUNS_PLACEHOLDER_FILES:
+                if candidate.is_symlink() or not candidate.is_file():
+                    raise RegistryIntegrityError("unexpected entry in runs directory")
                 continue
             if candidate.is_symlink() or not candidate.is_dir():
                 raise RegistryIntegrityError("unexpected entry in runs directory")

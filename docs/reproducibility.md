@@ -127,6 +127,7 @@ The default registry layout is:
 
 ```text
 experiments/
+├── runs/.gitkeep               # tracked placeholder, ignored by run scans
 ├── runs/<run-id>/
 │   ├── manifest.json
 │   ├── evaluation.json          # when evaluation produced a report
@@ -144,7 +145,10 @@ files, the checksum index, and the manifest are created without overwriting,
 flushed, and the directory is renamed to the final run ID on the same
 filesystem. The final name is never reused. Concurrent registration of the
 same run ID yields one winner and one duplicate-run error. Staging directories
-are ignored by listing and removed after local registration failures.
+are ignored by listing and removed after local registration failures. The
+regular file `runs/.gitkeep` is the only repository placeholder ignored by run
+scans; other unexpected files, dotfiles, and malformed run directories are
+rejected.
 
 All persisted paths are portable relative POSIX paths. Absolute paths, parent
 components, empty components, and backslashes are rejected. Verification opens
