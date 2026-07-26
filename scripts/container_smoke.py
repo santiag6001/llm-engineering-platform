@@ -89,6 +89,16 @@ def _run(
     )
 
 
+def assert_intentional_shutdown_exit_code(exit_code: str) -> None:
+    """Accept only clean or SIGTERM exits after the smoke test stops Compose."""
+
+    if exit_code not in {"0", "143"}:
+        raise RuntimeError(
+            f"gateway exited with status {exit_code}, expected 0 or 143 "
+            "after intentional stop"
+        )
+
+
 def run_smoke(*, build: bool) -> None:
     project = f"llm-platform-smoke-{os.getpid()}"
     configured_port = os.getenv("GATEWAY_PORT")
@@ -138,8 +148,7 @@ def run_smoke(*, build: bool) -> None:
             environment=environment,
             capture_output=True,
         ).stdout.strip()
-        if exit_code != "0":
-            raise RuntimeError(f"gateway exited with status {exit_code}, expected 0")
+        assert_intentional_shutdown_exit_code(exit_code)
         print("container smoke test passed")
     finally:
         subprocess.run(

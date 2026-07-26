@@ -116,3 +116,18 @@ def test_smoke_contract_rejects_tracebacks(
     monkeypatch.setattr(container_smoke, "fetch", traceback_response)
     with pytest.raises(RuntimeError, match="traceback"):
         container_smoke.assert_gateway_contract("http://gateway.test")
+
+
+@pytest.mark.parametrize("exit_code", ["0", "143"])
+def test_intentional_smoke_shutdown_accepts_expected_exit_codes(
+    exit_code: str,
+) -> None:
+    container_smoke.assert_intentional_shutdown_exit_code(exit_code)
+
+
+@pytest.mark.parametrize("exit_code", ["137", "1"])
+def test_intentional_smoke_shutdown_rejects_unexpected_exit_codes(
+    exit_code: str,
+) -> None:
+    with pytest.raises(RuntimeError, match=rf"status {exit_code}"):
+        container_smoke.assert_intentional_shutdown_exit_code(exit_code)
