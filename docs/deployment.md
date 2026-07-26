@@ -179,16 +179,18 @@ locks plus the project as an editable no-dependency install, then runs:
 6. `llm-eval --help`, `run --help`, and `compare --help`
 7. every `llm-experiment` command help surface
 8. the deterministic offline experiment-registry/artifact smoke test
-9. `git diff --check`
+9. every `llm-rag` command help surface
+10. `git diff --check`
 
 The parallel container job validates base Compose rendering, builds the
 gateway, and runs the model-free smoke test. It does not pull a model, contact
 a running llama-server or hosted LLM API, use a GPU, consume secrets, log into
 a registry, push an image, or require cloud credentials.
 
-Phase 6 extends only the deterministic quality job. The experiment registry is
-not a Compose service, generated runs are excluded from the gateway build
-context, and the image runtime command remains unchanged.
+Phases 6 and 7 extend only the deterministic quality job. Neither the
+experiment registry nor RAG is a Compose service; generated runs and
+`rag-data/` are excluded from the gateway build context, and the image runtime
+command remains unchanged.
 
 GitHub Actions are referenced by pinned major release lines. Docker commands
 use the hosted runner's installed Compose plugin; no Docker socket is mounted

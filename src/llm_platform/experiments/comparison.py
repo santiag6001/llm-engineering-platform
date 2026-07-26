@@ -60,6 +60,12 @@ def compare_manifests(
         right.generation.model_dump(mode="json"),
     )
     _record(
+        differences["input_configuration"],
+        "rag",
+        left.rag.model_dump(mode="json") if left.rag is not None else None,
+        right.rag.model_dump(mode="json") if right.rag is not None else None,
+    )
+    _record(
         differences["source_code"],
         "source.git_commit",
         left.source.git_commit,

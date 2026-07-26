@@ -18,6 +18,7 @@ tests
 docs
 evaluations
 experiments
+rag-data
 models
 *.gguf
 *.env

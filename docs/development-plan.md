@@ -283,7 +283,60 @@ audited, and every registered artifact can be verified.
 The local-registry decision and the effect on later numbering are recorded in
 [ADR 0003](adr/0003-local-reproducible-experiment-registry.md).
 
-## 9. Phase 7 — Bounded queue and concurrency control
+## 9. Phase 7 — Production RAG engineering
+
+**Status: complete.**
+
+**Working system:** a standalone local CLI registers documents, builds
+deterministic chunks and CPU embeddings, persists a reproducible vector index,
+retrieves cited context, evaluates retrieval, and binds provenance into Phase 6
+experiment manifests without changing the serving runtime.
+
+### Deliverables
+
+- Immutable content-addressed document registry with SHA-256, logical identity,
+  byte size, content type, ingestion time, stable fingerprint, and duplicate
+  prevention.
+- Configuration-sensitive deterministic character/line/paragraph chunking
+  with hashes, parent IDs, offsets, indices, and fingerprints.
+- Versioned local CPU hashing embeddings with model, dimension, and
+  configuration fingerprint metadata.
+- Stable ordered JSON vector-index builds with persistent metadata, integrity
+  validation, explicit rebuilds, and an index fingerprint.
+- Top-K and threshold retrieval with optional deterministic MMR.
+- Deterministic context ordering, separator policy, token estimate, and
+  context fingerprint.
+- Structured citations containing document, chunk, character range, and score.
+- Offline Precision@K, Recall@K, MRR, Hit Rate, citation-correctness, and
+  context-utilization evaluation.
+- Optional strict RAG provenance in Phase 6 experiment manifests and identity.
+- `llm-rag ingest`, `build-index`, `retrieve`, `evaluate`, `inspect`,
+  `show-document`, and `show-chunk`.
+
+### Tests
+
+- Document identity, immutable registration, content integrity, and duplicate
+  prevention.
+- Chunk reproduction, offsets, ordering, and configuration-sensitive
+  fingerprints.
+- Embedding metadata/vector stability and deterministic index rebuilds.
+- Retrieval scoring/order, thresholds, MMR, context, and citations.
+- Every retrieval metric and strict retrieval-dataset behavior.
+- RAG provenance generation and Phase 6 manifest persistence.
+- Complete Phase 1–6 regression suite and every RAG CLI help surface.
+
+### Exit criteria
+
+The complete offline suite passes without a backend, model, network, GPU,
+Docker daemon, database, hosted API, or secret. Rebuilding unchanged inputs
+produces the same chunk/index identities, retrieval output is deterministically
+ranked, and an experiment can bind retrieval and citation metrics to immutable
+artifacts.
+
+The roadmap insertion is recorded in
+[ADR 0004](adr/0004-production-rag-before-runtime-scheduling.md).
+
+## 10. Phase 8 — Bounded queue and concurrency control
 
 **Working system:** requests above the active limit wait in a bounded FIFO
 queue; overload is rejected predictably; cancellation frees capacity.
@@ -315,7 +368,7 @@ A load scenario demonstrates a bounded active count, a bounded queue, and
 predictable rejection. After the scenario, active and queued counts return to
 zero.
 
-## 10. Phase 8 — Resilience and process lifecycle
+## 11. Phase 9 — Resilience and process lifecycle
 
 **Working system:** the service behaves predictably during backend failure,
 startup, and shutdown while preserving established API and scheduling behavior.
@@ -346,7 +399,7 @@ startup, and shutdown while preserving established API and scheduling behavior.
 Automated integration tests can kill or stall the fake backend and initiate
 shutdown without hanging the API or leaking tasks.
 
-## 11. Phase 9 — Grafana and operational deployment extensions
+## 12. Phase 10 — Grafana and operational deployment extensions
 
 **Working system:** the established Compose deployment gains a provisioned
 Grafana dashboard and operational real-model acceptance checks after runtime
@@ -374,7 +427,7 @@ A fresh Ubuntu 24.04/WSL2 environment with Docker and a supplied compatible GGUF
 model can follow the README to reach a ready deployment with a provisioned
 dashboard and validated shutdown behavior.
 
-## 12. Phase 10 — Reproducible benchmarks
+## 13. Phase 11 — Reproducible benchmarks
 
 **Working system:** a benchmark runner sends defined workloads, validates
 responses, and writes results with enough metadata to repeat and compare runs.
@@ -408,7 +461,7 @@ Two runs with the same inputs are structurally comparable, and the report makes
 hardware/model/config differences obvious. No baseline performance claim is
 published without its metadata.
 
-## 13. Phase 11 — Release hardening
+## 14. Phase 12 — Release hardening
 
 **Working system:** the complete educational platform can be cloned, validated,
 operated, and studied from its documentation.
@@ -439,9 +492,9 @@ operated, and studied from its documentation.
 All documented acceptance checks pass, known limitations are explicit, and a
 new contributor can reproduce both the deployment and a benchmark.
 
-## 14. Deferred roadmap
+## 15. Deferred roadmap
 
-The following begin only after Phase 11, each as another independently working
+The following begin only after Phase 12, each as another independently working
 vertical increment:
 
 1. API-key authentication and principal context.

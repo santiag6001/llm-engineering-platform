@@ -15,6 +15,7 @@ from llm_platform.experiments.models import (
     EvaluationConfiguration,
     GenerationConfiguration,
     PromptIdentity,
+    RAGExperimentMetadata,
     RegressionGates,
     SourceMetadata,
 )
@@ -47,6 +48,7 @@ def experiment_fingerprint(
     prompt: PromptIdentity | None,
     source: SourceMetadata,
     deployment: DeploymentMetadata | None = None,
+    rag: RAGExperimentMetadata | None = None,
     schema_version: str = "1.0",
 ) -> str:
     """Hash canonical experiment inputs, excluding execution and result fields."""
@@ -79,6 +81,11 @@ def experiment_fingerprint(
             deployment.model_dump(mode="json") if deployment is not None else None
         ),
     }
+    if rag is not None:
+        inputs = {
+            **inputs,
+            "rag": rag.model_dump(mode="json"),
+        }
     return sha256_bytes(canonical_json(inputs))
 
 

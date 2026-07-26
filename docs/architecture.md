@@ -67,7 +67,8 @@ boundaries that need contract tests, failure injection, or future replacement.
 
 ## 3. Runtime topology
 
-The Phase 5 base Docker Compose deployment, unchanged by Phase 6, contains:
+The Phase 5 base Docker Compose deployment, unchanged by Phases 6 and 7,
+contains:
 
 1. **Gateway:** one Uvicorn/FastAPI process, the backend adapter, and
    `/metrics`.
@@ -95,6 +96,13 @@ bounded source/environment metadata, and writes an atomic local registry. It is
 an offline-capable CLI concern. Neither the serving application nor evaluation
 logic imports it.
 
+Production RAG is likewise outside the runtime topology. The Phase 7
+`llm_platform.rag` package operates on bounded local documents and JSON
+artifacts through `llm-rag`. It does not add a FastAPI route, dependency,
+startup resource, model download, or Compose service. Its strict provenance
+artifact can be supplied to the experiment layer, but the serving runtime
+imports neither package.
+
 ```mermaid
 flowchart LR
     Config[Experiment configuration] --> Experiment[Experiment runner]
@@ -104,6 +112,18 @@ flowchart LR
     Eval --> Reports[Existing reports and gates]
     Reports --> Experiment
     Experiment --> Registry[Local atomic registry]
+```
+
+```mermaid
+flowchart LR
+    Sources[Local UTF-8 sources] --> Docs[Document registry]
+    Docs --> Chunks[Deterministic chunks]
+    Chunks --> Embed[Versioned CPU embeddings]
+    Embed --> Index[Persistent local vector index]
+    Index --> Retrieve[Ranked retrieval]
+    Retrieve --> Context[Context and citations]
+    Retrieve --> RAGEval[Retrieval evaluation]
+    RAGEval --> Experiment[Optional experiment provenance]
 ```
 
 ## 4. Component responsibilities
@@ -267,6 +287,31 @@ records its resolved immutable baseline run ID. The complete schema, privacy,
 and atomicity contract is in [Reproducibility](reproducibility.md) and the local
 registry decision is in
 [ADR 0003](adr/0003-local-reproducible-experiment-registry.md).
+
+### 4.9 RAG layer
+
+The standalone `llm_platform.rag` package owns:
+
+- bounded immutable UTF-8 document registration and exact-byte identity;
+- deterministic configuration-sensitive chunking and character offsets;
+- a versioned local CPU embedding baseline with no model download;
+- stable vector-index builds, persistent metadata, and integrity validation;
+- top-K, threshold, and optional MMR retrieval with deterministic tie-breaking;
+- ordered context assembly, token estimation, and structured citations;
+- deterministic retrieval/citation/context metrics; and
+- a portable provenance payload for the Phase 6 experiment manifest.
+
+It does not own FastAPI routes, completion orchestration, llama.cpp transport,
+Prometheus metrics, deployment, answer generation, or experiment-registry
+atomicity. The FastAPI composition root has no RAG dependency. The Phase 6
+experiment package accepts strict RAG metadata only when explicitly supplied;
+non-RAG experiment identity and behavior remain unchanged.
+
+The local JSON index is a bounded educational adapter. It intentionally trades
+large-scale approximate-nearest-neighbor performance and concurrent mutation
+for transparent stable ordering and inspectable reproducibility. The complete
+contract is in [Production RAG](rag.md), and the roadmap insertion is recorded
+in [ADR 0004](adr/0004-production-rag-before-runtime-scheduling.md).
 
 ## 5. Request lifecycle
 
@@ -460,6 +505,9 @@ metrics, but never high-cardinality or sensitive values.
   allowlists, concurrent atomic registration, alias resolution, artifact
   integrity, orchestration reuse, registered-run comparison, CLI exits, and an
   offline registry smoke test.
+- **RAG tests:** document/chunk identities, deterministic CPU embeddings,
+  stable index rebuilds, ranked retrieval/MMR, context/citations, every
+  retrieval metric, experiment provenance, and CLI contracts.
 
 Tests must not require downloading a large model in the default suite.
 
@@ -515,6 +563,8 @@ Initial architectural decision records should capture:
    the serving runtime.
 8. A local filesystem experiment registry before an external tracking platform
    or database.
+9. A standalone local RAG engineering layer before any serving-runtime RAG
+   endpoint or external vector database.
 
 These choices optimize clarity and replaceability. They explicitly trade away
 multi-worker global admission and distributed scheduling until a later phase.

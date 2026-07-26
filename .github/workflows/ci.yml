@@ -68,6 +68,17 @@ jobs:
           llm-experiment verify --help
           python scripts/experiment_registry_smoke.py
 
+      - name: Validate RAG CLI
+        run: |
+          llm-rag --help
+          llm-rag ingest --help
+          llm-rag build-index --help
+          llm-rag retrieve --help
+          llm-rag evaluate --help
+          llm-rag inspect --help
+          llm-rag show-document --help
+          llm-rag show-chunk --help
+
       - name: Validate whitespace
         run: git diff --check
 

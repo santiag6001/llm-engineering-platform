@@ -110,6 +110,7 @@ async def _run_command(args: argparse.Namespace) -> int:
             if args.deployment_runtime is not None
             else None
         ),
+        rag_metadata_file=args.rag_metadata,
     )
     result = await ExperimentRunner(registry).run(configuration)
     manifest = result.manifest
@@ -295,6 +296,11 @@ def _add_run_parser(
     )
     run.add_argument("--deployment-image", help="optional bounded image reference")
     run.add_argument("--deployment-name", help="optional deployment configuration name")
+    run.add_argument(
+        "--rag-metadata",
+        type=Path,
+        help="RAG provenance JSON produced by llm-rag evaluate",
+    )
 
 
 def _add_list_parser(

@@ -10,7 +10,7 @@ repeatable performance measurement. It is deliberately small enough to study
 and modify. It is not intended to compete with inference engines such as vLLM
 or SGLang.
 
-Phase 6 is implemented: the repository contains a locally runnable FastAPI
+Phase 7 is implemented: the repository contains a locally runnable FastAPI
 service with health checks, model discovery, and buffered or SSE-streaming chat
 completions forwarded to a separately running llama.cpp server, plus
 Prometheus-compatible production metrics and a separate deterministic
@@ -19,6 +19,10 @@ image, Docker Compose deployment, Prometheus scraping, and deterministic CI.
 It also provides a fully local reproducible experiment registry that binds
 evaluation artifacts to code, data, configuration, environment, and regression
 decisions.
+It additionally provides a deterministic local RAG engineering CLI for
+content-addressed documents, reproducible chunks and CPU embeddings, persistent
+vector indexes, cited retrieval, retrieval evaluation, and experiment
+provenance.
 Later capabilities remain on the phased development plan.
 
 ## Goals
@@ -31,6 +35,7 @@ Later capabilities remain on the phased development plan.
 - Provide a useful Grafana dashboard and a Docker Compose deployment.
 - Make benchmarks reproducible on a CPU-only development machine.
 - Keep API, orchestration, backend, telemetry, and deployment concerns separate.
+- Make local retrieval inputs, indexes, metrics, and provenance reproducible.
 - Provide stable extension points for authentication, rate limiting, multiple
   models, Kubernetes, and distributed operation.
 
@@ -106,6 +111,7 @@ The layout below is a design target, not yet implemented:
 │   ├── observability/   # metrics, logging, and request context
 │   ├── evaluation/      # standalone datasets, runner, reports, and gates
 │   ├── experiments/     # local identities, manifests, registry, and CLI
+│   ├── rag/             # local documents, chunks, indexes, retrieval, evaluation
 │   └── config/          # typed settings and composition root
 ├── tests/
 │   ├── unit/
@@ -139,11 +145,12 @@ without invalidating earlier behavior:
 4. LLM evaluation and regression
 5. Reproducible containerized deployment and CI/CD
 6. Reproducible LLM engineering
-7. Bounded queue and concurrency control
-8. Production error handling and lifecycle management
-9. Grafana and operational deployment extensions
-10. Reproducible benchmarks
-11. Release hardening
+7. Production RAG engineering
+8. Bounded queue and concurrency control
+9. Production error handling and lifecycle management
+10. Grafana and operational deployment extensions
+11. Reproducible benchmarks
+12. Release hardening
 
 The detailed entry criteria, deliverables, tests, and exit criteria are in the
 [Development plan](docs/development-plan.md).
@@ -180,6 +187,8 @@ The detailed entry criteria, deliverables, tests, and exit criteria are in the
   behavior
 - [Reproducibility](docs/reproducibility.md): experiment identity, manifests,
   registry, integrity, privacy, and comparison semantics
+- [Production RAG](docs/rag.md): documents, chunking, embeddings, indexes,
+  retrieval, citations, evaluation, and experiment provenance
 - [Contributor/agent guidance](AGENTS.md): rules for future implementation work
 
 ## Local run
@@ -492,8 +501,8 @@ bodies, and model file paths are never metric labels.
 
 ## Current status
 
-Phase 6 reproducible LLM engineering is implemented alongside the unchanged
-Phase 1–5 runtime, evaluation, metrics, and deployment behavior.
+Phase 7 production RAG engineering is implemented alongside the unchanged
+Phase 1–6 runtime, evaluation, metrics, deployment, and experiment behavior.
 
 ## Phase 4 Evaluation and Regression
 
@@ -919,3 +928,92 @@ Stable experiment CLI exits are `0` for success, `1` for regression failure,
 `2` for invalid input, `3` for an operational evaluation failure with a
 preserved manifest, `4` for registry/artifact integrity failure, and `5` for a
 missing run or alias. Expected failures do not print tracebacks.
+
+## Phase 7 Production RAG Engineering
+
+### Architecture
+
+`llm-rag` is a standalone, fully local engineering path:
+
+```text
+UTF-8 documents -> content-addressed registry -> deterministic chunks
+               -> versioned CPU embeddings -> persistent JSON vector index
+               -> top-K/threshold/MMR retrieval
+               -> deterministic context + structured citations
+               -> offline retrieval metrics + experiment provenance
+```
+
+The FastAPI application does not import `llm_platform.rag`; Phase 1–6 HTTP,
+SSE, metrics, evaluation, deployment, and experiment CLI contracts are
+unchanged. The local hashing embedder uses no hosted API or downloaded model,
+and the JSON index is not an external vector database.
+
+### Local workflow
+
+Register a bounded UTF-8 source and build a reproducible index:
+
+```bash
+llm-rag ingest docs/rag.md \
+  --store rag-data \
+  --content-type text/markdown
+
+llm-rag build-index \
+  --store rag-data \
+  --chunk-size 800 \
+  --overlap 100 \
+  --separator-strategy paragraph \
+  --dimension 256
+```
+
+Retrieve ranked evidence with deterministic context and structured document,
+chunk, character-range, and score citations:
+
+```bash
+llm-rag retrieve "How is citation correctness measured?" \
+  --store rag-data \
+  --top-k 5
+```
+
+Inspect the full provenance graph:
+
+```bash
+llm-rag inspect --store rag-data
+llm-rag show-document <document-id> --store rag-data
+llm-rag show-chunk <chunk-id> --store rag-data
+```
+
+### Retrieval evaluation and experiments
+
+Strict local retrieval datasets map stable queries to relevant chunk IDs.
+Evaluation reports Precision@K, Recall@K, MRR, Hit Rate, citation correctness,
+context utilization, ordered case results, and context fingerprints:
+
+```bash
+llm-rag evaluate \
+  --dataset retrieval-dataset.json \
+  --store rag-data \
+  --top-k 5 \
+  --output retrieval-report.json \
+  --experiment-metadata-output rag-metadata.json
+```
+
+Bind that metadata into an immutable Phase 6 experiment:
+
+```bash
+llm-experiment run \
+  --dataset evaluations/datasets/serving-concepts.jsonl \
+  --base-url http://127.0.0.1:8000 \
+  --model local-model \
+  --rag-metadata rag-metadata.json
+```
+
+The manifest records the corpus/document fingerprint, chunk configuration and
+fingerprints, embedding configuration, index fingerprint, retriever
+configuration, retrieval metrics, and citation metrics. RAG metadata affects
+experiment identity when supplied; existing non-RAG experiment fingerprints
+remain unchanged.
+
+See [Production RAG](docs/rag.md) for lifecycle, metric, persistence, privacy,
+and limitation details. Phase 7 does not add a RAG HTTP endpoint, answer
+generation path, agent runtime, request scheduler, authentication, Kubernetes,
+MLflow, Langfuse, hosted API, or external vector database.

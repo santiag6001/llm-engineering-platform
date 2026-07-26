@@ -22,3 +22,4 @@ experiments/comparisons/*
 experiments/runs/.staging-*
 experiments/aliases/.alias-*
 experiments/comparisons/.comparison-*
+rag-data/

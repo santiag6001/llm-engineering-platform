@@ -17,8 +17,9 @@ This phase does not provide bit-for-bit model-output reproducibility. Sampling,
 backend implementation details, thread scheduling, CPU kernels, and model
 versions can affect generated text even when the recorded configuration is the
 same. It also does not add MLflow, Weights & Biases, Langfuse, a database,
-hosted storage, signing, authentication, model downloading, RAG, agents,
-fine-tuning, or deployment orchestration.
+hosted storage, signing, authentication, model downloading, agents, fine-tuning,
+or deployment orchestration. Phase 7 can supply strict local RAG provenance,
+but the experiment runner does not build or query an index.
 
 ## 2. Identity and canonicalization
 
@@ -41,9 +42,10 @@ Fingerprint schema `1.0` includes exactly:
 - evaluation concurrency and timeout;
 - resolved immutable baseline run ID and all configured regression gates;
 - shared prompt logical name, version, and exact-byte content SHA-256, when
-  configured; and
-- source Git commit, when available; and
-- optional bounded deployment runtime, image reference, and configuration name.
+  configured;
+- source Git commit, when available;
+- optional bounded deployment runtime, image reference, and configuration name;
+- optional strict RAG provenance when `--rag-metadata` is supplied.
 
 The fingerprint excludes run ID, creation time, branch, dirty flag, dataset and
 prompt file paths, base URL, environment, output metrics, backend-observed
@@ -68,6 +70,8 @@ Unknown fields are rejected. The manifest contains:
   `passed`, `failed`, or `not_evaluated` decision;
 - bounded environment metadata and its fingerprint;
 - optional deployment runtime, image reference, and configuration name;
+- optional strict Phase 7 RAG document/chunk/embedding/index/retriever
+  provenance and retrieval/citation metrics;
 - artifact kind, portable relative path, byte size, and SHA-256;
 - aggregate pass/error rates, nearest-rank P50/P95 duration, and token totals;
 - a bounded reproduction specification; and
@@ -273,3 +277,18 @@ Curated examples and placeholder files remain tracked. The registry has no
 cross-machine locking protocol, history for aliases, schema migration utility,
 garbage collection, signing, remote replication, database indexing, UI, or
 external experiment-platform integration.
+
+## 14. Phase 7 RAG provenance
+
+`llm-rag evaluate --experiment-metadata-output` produces the accepted RAG
+metadata shape. `llm-experiment run --rag-metadata` strictly validates and
+embeds its corpus/document fingerprint, chunk configuration and fingerprints,
+embedding configuration, index fingerprint, retriever configuration,
+retrieval metrics, and citation metrics.
+
+The RAG block participates in the experiment fingerprint only when supplied.
+For existing non-RAG runs, `rag` is `null` and the Phase 6 canonical experiment
+input remains unchanged. The reproduction specification records a portable
+metadata path, not a machine-specific absolute path. The experiment runner
+does not rebuild the index or independently recompute retrieval metrics; the
+manifest binds the already-produced strict local provenance artifact.

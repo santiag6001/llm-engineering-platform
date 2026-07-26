@@ -48,6 +48,7 @@ from llm_platform.experiments.models import (
     GenerationConfiguration,
     ModelMetadata,
     PromptIdentity,
+    RAGExperimentMetadata,
     RegressionGates,
     RegressionMetadata,
     ReproductionSpecification,
@@ -84,6 +85,7 @@ class ExperimentConfiguration(BaseModel):
     prompt_name: str | None = Field(default=None, min_length=1, max_length=128)
     prompt_version: str | None = Field(default=None, min_length=1, max_length=64)
     deployment: DeploymentMetadata | None = None
+    rag_metadata_file: Path | None = None
 
     @model_validator(mode="after")
     def validate_related_configuration(self) -> ExperimentConfiguration:
@@ -156,6 +158,7 @@ class ExperimentRunner:
                 raise ValueError("baseline run has no evaluation report")
         source = self._source_collector()
         environment = self._environment_collector()
+        rag = _load_rag_metadata(configuration.rag_metadata_file)
         created_at = self._now().astimezone(UTC)
         dataset_metadata = DatasetMetadata(
             identifier=configuration.dataset_identifier
@@ -180,6 +183,7 @@ class ExperimentRunner:
             prompt=prompt,
             source=source,
             deployment=configuration.deployment,
+            rag=rag,
         )
         run_id = self._run_id_factory(fingerprint)
 
@@ -214,6 +218,7 @@ class ExperimentRunner:
                 run_id=run_id,
                 created_at=created_at,
                 baseline_run_id=baseline_run_id,
+                rag=rag,
                 message=SAFE_OPERATIONAL_FAILURE,
             )
 
@@ -229,6 +234,7 @@ class ExperimentRunner:
             created_at=created_at,
             report=report,
             baseline_run_id=baseline_run_id,
+            rag=rag,
         )
 
     def _register_report(
@@ -245,6 +251,7 @@ class ExperimentRunner:
         created_at: datetime,
         report: EvaluationReport,
         baseline_run_id: str | None,
+        rag: RAGExperimentMetadata | None,
     ) -> ExperimentRunResult:
         artifacts: list[ArtifactPayload] = [
             ArtifactPayload(
@@ -339,6 +346,7 @@ class ExperimentRunner:
             artifacts=artifacts,
             backend_model=_observed_backend_model(report),
             failure=failure,
+            rag=rag,
         )
         self.registry.register(manifest, artifacts)
         return ExperimentRunResult(manifest=manifest, exit_code=exit_code)
@@ -356,6 +364,7 @@ class ExperimentRunner:
         run_id: str,
         created_at: datetime,
         baseline_run_id: str | None,
+        rag: RAGExperimentMetadata | None,
         message: str,
     ) -> ExperimentRunResult:
         regression = RegressionMetadata(
@@ -408,6 +417,7 @@ class ExperimentRunner:
             artifacts=artifacts,
             backend_model=None,
             failure=FailureMetadata(message=message),
+            rag=rag,
         )
         self.registry.register(manifest, artifacts)
         return ExperimentRunResult(manifest=manifest, exit_code=3)
@@ -480,6 +490,7 @@ def _manifest(
     artifacts: list[ArtifactPayload],
     backend_model: str | None,
     failure: FailureMetadata | None,
+    rag: RAGExperimentMetadata | None,
 ) -> ExperimentManifest:
     return ExperimentManifest.model_validate(
         {
@@ -499,6 +510,7 @@ def _manifest(
             "regression": regression,
             "environment": environment,
             "deployment": configuration.deployment,
+            "rag": rag,
             "artifacts": [artifact.metadata() for artifact in artifacts],
             "aggregate_results": aggregate,
             "reproduction": ReproductionSpecification(
@@ -512,6 +524,11 @@ def _manifest(
                 source_git_commit=source.git_commit,
                 project_version=environment.project_version,
                 deployment=configuration.deployment,
+                rag_metadata_path=(
+                    _portable_path(configuration.rag_metadata_file)
+                    if configuration.rag_metadata_file is not None
+                    else None
+                ),
             ),
             "failure": failure,
         }
@@ -619,6 +636,9 @@ def _summary_markdown(
                 "--deployment-name "
                 f"{shlex.quote(configuration.deployment.configuration_name)}"
             )
+    if configuration.rag_metadata_file is not None:
+        rag_path = _portable_path(configuration.rag_metadata_file)
+        command.append(f"--rag-metadata {shlex.quote(rag_path)}")
     command_separator = " \\" + "\n  "
     lines = [
         "# Experiment Summary",
@@ -656,3 +676,18 @@ def _json_bytes(value: object) -> bytes:
     return (
         json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     ).encode()
+
+
+def _load_rag_metadata(path: Path | None) -> RAGExperimentMetadata | None:
+    if path is None:
+        return None
+    try:
+        content = path.read_bytes()
+    except OSError as exc:
+        raise ValueError("could not read RAG metadata file") from exc
+    if len(content) > 16 * 1024 * 1024:
+        raise ValueError("RAG metadata exceeds 16777216 byte limit")
+    try:
+        return RAGExperimentMetadata.model_validate_json(content)
+    except ValueError as exc:
+        raise ValueError("RAG metadata is malformed") from exc

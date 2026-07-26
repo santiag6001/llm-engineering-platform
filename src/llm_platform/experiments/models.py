@@ -134,6 +134,73 @@ class DeploymentMetadata(StrictModel):
     configuration_name: str | None = Field(default=None, min_length=1, max_length=128)
 
 
+class RAGChunkConfiguration(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
+    chunk_size: int = Field(ge=1, le=65_536)
+    overlap: int = Field(ge=0, le=65_535)
+    separator_strategy: Literal["character", "line", "paragraph"]
+
+    @model_validator(mode="after")
+    def overlap_is_smaller(self) -> RAGChunkConfiguration:
+        if self.overlap >= self.chunk_size:
+            raise ValueError("overlap must be smaller than chunk_size")
+        return self
+
+
+class RAGEmbeddingConfiguration(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
+    model: Literal["local-hashing-embedding"]
+    model_version: Literal["1.0"]
+    dimension: int = Field(ge=8, le=4096)
+
+
+class RAGRetrieverConfiguration(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
+    top_k: int = Field(ge=1, le=100)
+    score_threshold: float | None = Field(default=None, ge=-1, le=1)
+    mmr: bool
+    mmr_lambda: float = Field(ge=0, le=1)
+
+
+class RAGRetrievalMetrics(StrictModel):
+    precision_at_k: float = Field(ge=0, le=1)
+    recall_at_k: float = Field(ge=0, le=1)
+    mrr: float = Field(ge=0, le=1)
+    hit_rate: float = Field(ge=0, le=1)
+
+
+class RAGCitationMetrics(StrictModel):
+    citation_correctness: float = Field(ge=0, le=1)
+    context_utilization: float = Field(ge=0, le=1)
+
+
+class RAGExperimentMetadata(StrictModel):
+    """RAG inputs, identities, and quality metrics bound to an experiment."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    document_fingerprint: str = Field(pattern=SHA256_PATTERN)
+    chunk_configuration: RAGChunkConfiguration
+    chunk_fingerprints: list[str] = Field(max_length=100_000)
+    embedding_configuration: RAGEmbeddingConfiguration
+    index_fingerprint: str = Field(pattern=SHA256_PATTERN)
+    retriever_configuration: RAGRetrieverConfiguration
+    retrieval_metrics: RAGRetrievalMetrics
+    citation_metrics: RAGCitationMetrics
+
+    @field_validator("chunk_fingerprints")
+    @classmethod
+    def chunk_fingerprints_are_hashes(cls, value: list[str]) -> list[str]:
+        if any(
+            len(item) != 64
+            or any(character not in "0123456789abcdef" for character in item)
+            for item in value
+        ):
+            raise ValueError("chunk fingerprints must be SHA-256 values")
+        if len(value) != len(set(value)):
+            raise ValueError("chunk fingerprints must be unique")
+        return value
+
+
 ArtifactKind = Literal[
     "evaluation_json",
     "evaluation_markdown",
@@ -187,11 +254,12 @@ class ReproductionSpecification(StrictModel):
     source_git_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{7,64}$")
     project_version: str = Field(min_length=1, max_length=64)
     deployment: DeploymentMetadata | None = None
+    rag_metadata_path: str | None = Field(default=None, max_length=512)
 
-    @field_validator("dataset_path")
+    @field_validator("dataset_path", "rag_metadata_path")
     @classmethod
-    def path_is_portable(cls, value: str) -> str:
-        return _portable_relative_path(value)
+    def path_is_portable(cls, value: str | None) -> str | None:
+        return None if value is None else _portable_relative_path(value)
 
 
 class ExperimentManifest(StrictModel):
@@ -209,6 +277,7 @@ class ExperimentManifest(StrictModel):
     regression: RegressionMetadata
     environment: EnvironmentMetadata
     deployment: DeploymentMetadata | None = None
+    rag: RAGExperimentMetadata | None = None
     artifacts: list[ArtifactMetadata] = Field(min_length=1, max_length=16)
     aggregate_results: AggregateResults
     reproduction: ReproductionSpecification
